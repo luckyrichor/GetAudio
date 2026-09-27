@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import re
-import subprocess
 import tempfile
 import time
 import urllib.parse
@@ -169,9 +167,11 @@ class BilibiliExtractor:
 
         d = data["data"]
         pages = d.get("pages") or []
-        # 分 P：URL 里的 p 是 1-based
-        page_no = _page_of(link.url)
-        if pages and 1 <= page_no <= len(pages):
+        # 分 P：p 是 1-based；无效页不能悄悄退回 P1。
+        page_no = link.page
+        if page_no > 1 and (not pages or page_no > len(pages)):
+            raise ExtractorError(f"稿件没有 P{page_no}（共 {len(pages)} P）")
+        if pages:
             cid = pages[page_no - 1]["cid"]
             if page_no > 1:
                 # 分 P 标题要带上，否则一个合集里所有条目同名
@@ -243,9 +243,9 @@ class BilibiliExtractor:
         pubdate = d.get("pubdate")
         return MediaInfo(
             platform=Platform.BILIBILI,
-            video_id=d.get("bvid") or link.video_id,
+            video_id=link.track_key,
             title=(d.get("title") or "").strip() or f"bilibili-{link.video_id}",
-            webpage_url=f"https://www.bilibili.com/video/{d.get('bvid') or link.video_id}",
+            webpage_url=link.url,
             uploader=owner.get("name"),
             description=d.get("desc"),
             thumbnail_url=d.get("pic"),
@@ -253,14 +253,6 @@ class BilibiliExtractor:
             duration_sec=float(d["duration"]) if d.get("duration") else None,
             tags=_tags_of(d),
         )
-
-
-_P_RE = re.compile(r"[?&]p=(\d+)")
-
-
-def _page_of(url: str) -> int:
-    m = _P_RE.search(url)
-    return int(m.group(1)) if m else 1
 
 
 def _tags_of(d: dict) -> list[str]:

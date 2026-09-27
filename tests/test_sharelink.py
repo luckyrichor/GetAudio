@@ -52,6 +52,28 @@ def test_page_preserved():
     """分 P 的 p 参数要留着，否则永远只下第一集。"""
     link = resolve("https://www.bilibili.com/video/BV1GJ411x7h7?p=3")
     assert "p=3" in link.url
+    assert link.page == 3
+    assert link.track_key == "BV1GJ411x7h7-p3"
+
+
+def test_first_page_uses_existing_identity():
+    first = resolve("https://www.bilibili.com/video/BV1GJ411x7h7")
+    explicit = resolve("https://www.bilibili.com/video/BV1GJ411x7h7?p=1")
+    assert first.track_key == explicit.track_key == "BV1GJ411x7h7"
+    assert first.url == explicit.url
+
+
+def test_av_page_preserved():
+    link = resolve("https://www.bilibili.com/video/av170001?p=2")
+    assert link.page == 2
+    assert link.track_key == "av170001-p2"
+    assert link.url.endswith("?p=2")
+
+
+@pytest.mark.parametrize("page", ["0", "-1", "abc"])
+def test_invalid_bilibili_page_rejected(page):
+    with pytest.raises(LinkError, match="正整数"):
+        resolve(f"https://www.bilibili.com/video/BV1GJ411x7h7?p={page}")
 
 
 def test_url_not_swallowing_chinese():

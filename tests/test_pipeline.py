@@ -25,13 +25,13 @@ class _FakeExtractor:
         self.calls += 1
         info = MediaInfo(
             platform=link.platform,
-            video_id=link.video_id,
+            video_id=link.track_key,
             title="测试音频",
             webpage_url=link.url,
             uploader="测试 up 主",
             duration_sec=1.0,
         )
-        dest = settings.audio_dir / link.platform.value / f"{link.video_id}-测试音频.m4a"
+        dest = settings.audio_dir / link.platform.value / f"{link.track_key}-测试音频.m4a"
         dest.parent.mkdir(parents=True, exist_ok=True)
         import subprocess
 
@@ -53,9 +53,9 @@ def fake(monkeypatch):
     with session_scope() as s:
         s.query(ExtractJob).delete()
         s.query(AudioFingerprint).filter(AudioFingerprint.track_id.in_(
-            s.query(Track.id).filter(Track.video_id == "BV0000000001")
+            s.query(Track.id).filter(Track.video_id.like("BV0000000001%"))
         )).delete(synchronize_session=False)
-        s.query(Track).filter(Track.video_id == "BV0000000001").delete()
+        s.query(Track).filter(Track.video_id.like("BV0000000001%")).delete()
     yield ex
 
 
@@ -87,6 +87,20 @@ def test_force_redownloads_without_duplicating(fake):
     again = pipeline.extract("https://www.bilibili.com/video/BV0000000001", force=True)
     assert fake.calls == 2
     assert again.track_id == first.track_id, "force 应该覆盖原记录，而不是新增一条"
+
+
+def test_bilibili_parts_are_distinct_and_deduped_independently(fake):
+    base = "https://www.bilibili.com/video/BV0000000001"
+    first = pipeline.extract(base)
+    second = pipeline.extract(base + "?p=2")
+    again = pipeline.extract(base + "?p=2")
+    assert fake.calls == 2
+    assert first.track_id != second.track_id
+    assert second.reused is False
+    assert again.reused is True
+    assert again.track_id == second.track_id
+    with session_scope() as s:
+        assert s.get(Track, second.track_id).video_id == "BV0000000001-p2"
 
 
 def test_updated_seq_advances_on_force(fake):

@@ -108,10 +108,10 @@ def extract(raw_input: str, *, user_id: str | None = None, force: bool = False) 
             _fail(str(exc))
             raise
 
-        with _link_lock(link.platform.value, link.video_id):
+        with _link_lock(link.platform.value, link.track_key):
             with session_scope() as s:
                 j = s.get(ExtractJob, job_id)
-                j.platform, j.video_id, j.resolved_url = link.platform.value, link.video_id, link.url
+                j.platform, j.video_id, j.resolved_url = link.platform.value, link.track_key, link.url
 
             # 2. 查重：已经有了就直接返回，不重复下载
             if not force:
@@ -119,7 +119,7 @@ def extract(raw_input: str, *, user_id: str | None = None, force: bool = False) 
                     existing = s.execute(
                         select(Track).where(
                             Track.platform == link.platform.value,
-                            Track.video_id == link.video_id,
+                            Track.video_id == link.track_key,
                             Track.deleted == 0,
                         )
                     ).scalar_one_or_none()
@@ -160,11 +160,11 @@ def extract(raw_input: str, *, user_id: str | None = None, force: bool = False) 
             with session_scope() as s:
                 track = s.execute(
                     select(Track).where(
-                        Track.platform == link.platform.value, Track.video_id == link.video_id
+                        Track.platform == link.platform.value, Track.video_id == link.track_key
                     )
                 ).scalar_one_or_none()
                 if track is None:
-                    track = Track(platform=link.platform.value, video_id=link.video_id, audio_path=rel_path, source_url=link.url)
+                    track = Track(platform=link.platform.value, video_id=link.track_key, audio_path=rel_path, source_url=link.url)
                     s.add(track)
 
                 info = result.info

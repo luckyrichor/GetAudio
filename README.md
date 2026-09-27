@@ -26,6 +26,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 分享文案整段粘进去就行，不用自己抠链接。
 
+B 站合集链接可带 `?p=N` 提取指定分 P；各分 P 独立入库和去重。省略 `p` 或使用 `p=1` 都对应第一 P。
+
 ### Android
 
 ```bash

@@ -47,6 +47,14 @@ class ResolvedLink:
     video_id: str
     url: str
     raw_url: str
+    page: int = 1
+
+    @property
+    def track_key(self) -> str:
+        """分 P 是不同音频；P1 仍沿用旧键，保持已有记录可复用。"""
+        if self.platform is Platform.BILIBILI and self.page > 1:
+            return f"{self.video_id}-p{self.page}"
+        return self.video_id
 
     def __str__(self) -> str:  # pragma: no cover - 仅日志用
         return f"{self.platform.value}:{self.video_id}"
@@ -124,17 +132,23 @@ def _clean_query(url: httpx.URL) -> httpx.URL:
 
 def _normalize_bilibili(url: str) -> ResolvedLink | None:
     u = httpx.URL(url)
+    raw_page = u.params.get("p", "1")
+    if not raw_page.isdecimal() or int(raw_page) < 1:
+        raise LinkError("B 站分 P 参数 p 必须是正整数")
+    page = int(raw_page)
     bv = BV_RE.search(str(u))
     if bv:
         vid = bv.group(0)
         clean = _clean_query(httpx.URL(f"https://www.bilibili.com/video/{vid}"))
-        # 分 P 要保留，否则永远只下第一集
-        if page := u.params.get("p"):
-            clean = clean.copy_merge_params({"p": page})
-        return ResolvedLink(Platform.BILIBILI, vid, str(clean), url)
+        if page > 1:
+            clean = clean.copy_merge_params({"p": str(page)})
+        return ResolvedLink(Platform.BILIBILI, vid, str(clean), url, page)
     if av := AV_RE.search(str(u)):
         vid = f"av{av.group(1)}"
-        return ResolvedLink(Platform.BILIBILI, vid, f"https://www.bilibili.com/video/{vid}", url)
+        clean = f"https://www.bilibili.com/video/{vid}"
+        if page > 1:
+            clean += f"?p={page}"
+        return ResolvedLink(Platform.BILIBILI, vid, clean, url, page)
     return None
 
 
@@ -182,7 +196,7 @@ def resolve(text: str, *, client: httpx.Client | None = None) -> ResolvedLink:
             _normalize_bilibili(url) if platform is Platform.BILIBILI else _normalize_douyin(url)
         )
         if resolved:
-            return ResolvedLink(resolved.platform, resolved.video_id, resolved.url, raw)
+            return ResolvedLink(resolved.platform, resolved.video_id, resolved.url, raw, resolved.page)
         errors.append(f"{platform.value} 链接里解析不出视频 id: {url}")
 
     raise LinkError("; ".join(errors) or "无法解析")
