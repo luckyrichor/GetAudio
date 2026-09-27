@@ -126,3 +126,22 @@ class PlatformCredential(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class CrawlState(Base):
+    """关键词组的持久化调度状态，重启不丢轮询进度。"""
+
+    __tablename__ = "crawl_state"
+    name: Mapped[str] = mapped_column(String(128), primary_key=True)
+    next_run: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    last_run: Mapped[float | None] = mapped_column(Float)
+    summary_json: Mapped[str | None] = mapped_column(Text)
+
+
+class AudioFingerprint(Base):
+    """Chromaprint 指纹独立建表，不改写已有 tracks 表。"""
+
+    __tablename__ = "audio_fingerprints"
+    track_id: Mapped[int] = mapped_column(ForeignKey("tracks.id"), primary_key=True)
+    values_json: Mapped[str] = mapped_column(Text, nullable=False)
+    duration_sec: Mapped[float] = mapped_column(Float, nullable=False)

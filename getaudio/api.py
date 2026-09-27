@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -67,11 +68,17 @@ class TrackOut(BaseModel):
     source_url: str
     updated_seq: int
     deleted: bool
+    categories: list[str] = Field(default_factory=list)
+    has_vocal: bool | None = None
+    classify_stage: str | None = None
     download_url: str
 
     @classmethod
     def of(cls, t: Track) -> "TrackOut":
         return cls(
+            categories=json.loads(t.categories_json or "[]"),
+            has_vocal=None if t.has_vocal is None else bool(t.has_vocal),
+            classify_stage=t.classify_stage,
             id=t.id,
             platform=t.platform,
             video_id=t.video_id,
@@ -160,7 +167,7 @@ def api_extract(req: ExtractRequest, session: Session = Depends(get_session)) ->
 def api_tracks(
     q: str | None = Query(None, description="按标题模糊搜索"),
     platform: str | None = Query(None),
-    limit: int = Query(50, le=200),
+    limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[TrackOut]:
@@ -176,7 +183,7 @@ def api_tracks(
 @app.get("/sync", response_model=SyncResponse)
 def api_sync(
     cursor: int = Query(0, ge=0, description="上次同步到的 updated_seq"),
-    limit: int = Query(200, le=500),
+    limit: int = Query(200, ge=1, le=500),
     session: Session = Depends(get_session),
 ) -> SyncResponse:
     """增量同步。
@@ -207,7 +214,8 @@ def api_audio(track_id: int, session: Session = Depends(get_session)) -> FileRes
         raise HTTPException(status_code=410, detail="记录还在但文件已丢失")
     return FileResponse(
         path,
-        media_type="audio/mp4",
+        media_type={"m4a": "audio/mp4", "mp3": "audio/mpeg", "flac": "audio/flac",
+                    "ogg": "audio/ogg", "opus": "audio/ogg"}.get(track.audio_format, "application/octet-stream"),
         # 中文文件名交给 starlette 处理 RFC 5987 编码
         filename=f"{track.title[:60]}.{track.audio_format}",
     )

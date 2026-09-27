@@ -24,6 +24,8 @@ class TrackRepository(private val context: Context) {
 
     // ---------- 读 ----------
 
+    fun filtered(q: String, platform: String?, favoritesOnly: Boolean) = trackDao.filtered(q, platform, favoritesOnly)
+
     fun observeAll(): Flow<List<TrackEntity>> = trackDao.observeAll()
     fun search(q: String): Flow<List<TrackEntity>> = trackDao.search(q)
     fun byPlatform(p: String): Flow<List<TrackEntity>> = trackDao.byPlatform(p)
@@ -126,4 +128,7 @@ private fun TrackDto.toEntity() = TrackEntity(
     sourceUrl = sourceUrl,
     downloadUrl = downloadUrl,
     updatedSeq = updatedSeq,
+    categories = categories.joinToString(" · "),
+    hasVocal = hasVocal,
+    classifyStage = classifyStage,
 )

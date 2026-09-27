@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface TrackDao {
 
+    @Query("SELECT * FROM tracks WHERE (:platform IS NULL OR platform = :platform) AND (:favoritesOnly = 0 OR favorite = 1) AND (title LIKE '%' || :q || '%' OR uploader LIKE '%' || :q || '%' OR categories LIKE '%' || :q || '%') ORDER BY updatedSeq DESC")
+    fun filtered(q: String, platform: String?, favoritesOnly: Boolean): Flow<List<TrackEntity>>
+
     @Query("SELECT * FROM tracks ORDER BY updatedSeq DESC")
     fun observeAll(): Flow<List<TrackEntity>>
 

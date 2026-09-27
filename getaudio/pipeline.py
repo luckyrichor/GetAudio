@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 from .config import settings
 from .db import next_updated_seq, session_scope
-from . import credentials
+from . import credentials, classification, fingerprint
 from .extractors import ExtractorError, NeedsLoginError, get_extractor
 from .guest import ensure_guest_cookies
 from .models import ExtractJob, JobStatus, Track
@@ -89,85 +89,98 @@ def extract(raw_input: str, *, user_id: str | None = None, force: bool = False) 
 
                 j.finished_at = utcnow()
 
-    # 1. 解析分享文本
     try:
-        link = resolve(raw_input)
-    except LinkError as exc:
-        _fail(str(exc))
-        raise
+        # 1. 解析分享文本
+        try:
+            link = resolve(raw_input)
+        except LinkError as exc:
+            _fail(str(exc))
+            raise
 
-    with session_scope() as s:
-        j = s.get(ExtractJob, job_id)
-        j.platform, j.video_id, j.resolved_url = link.platform.value, link.video_id, link.url
-
-    # 2. 查重：已经有了就直接返回，不重复下载
-    if not force:
         with session_scope() as s:
-            existing = s.execute(
+            j = s.get(ExtractJob, job_id)
+            j.platform, j.video_id, j.resolved_url = link.platform.value, link.video_id, link.url
+
+        # 2. 查重：已经有了就直接返回，不重复下载
+        if not force:
+            with session_scope() as s:
+                existing = s.execute(
+                    select(Track).where(
+                        Track.platform == link.platform.value,
+                        Track.video_id == link.video_id,
+                        Track.deleted == 0,
+                    )
+                ).scalar_one_or_none()
+                if existing and (settings.audio_dir / existing.audio_path).exists():
+                    outcome = _to_outcome(existing, reused=True)
+                    from .models import utcnow
+                    job = s.get(ExtractJob, job_id)
+                    job.status = JobStatus.DONE
+                    job.track_id = existing.id
+                    job.finished_at = utcnow()
+                    log.info("命中去重，跳过下载: %s", link)
+                    return outcome
+
+        # 3. 下载 + 转码
+        try:
+            result = get_extractor(link.platform).extract(link, cookie_file=_cookie_file_for(user_id, link.platform))
+        except NeedsLoginError as exc:
+            # 带着凭证还被要求登录 —— 说明这份凭证过期了，标记掉，
+            # 免得后续每次请求都拿它去撞同一堵墙
+            if user_id and credentials.load(user_id, link.platform.value):
+                credentials.mark_needs_reauth(user_id, link.platform.value, str(exc))
+            _fail(str(exc))
+            raise
+        except ExtractorError as exc:
+            _fail(str(exc))
+            raise
+
+        classified = classification.classify(result.info)
+        audio_fingerprint = fingerprint.compute(result.audio_path)
+
+        # 4. 打标 + 算哈希
+        write_tags(result.audio_path, result.info)
+        audio_bytes = result.audio_path.stat().st_size
+        digest = _sha256(result.audio_path)
+        rel_path = str(result.audio_path.relative_to(settings.audio_dir))
+
+        # 5. 入库（upsert：force 重下时覆盖原记录，不产生第二条）
+        with session_scope() as s:
+            track = s.execute(
                 select(Track).where(
-                    Track.platform == link.platform.value,
-                    Track.video_id == link.video_id,
-                    Track.deleted == 0,
+                    Track.platform == link.platform.value, Track.video_id == link.video_id
                 )
             ).scalar_one_or_none()
-            if existing and (settings.audio_dir / existing.audio_path).exists():
-                outcome = _to_outcome(existing, reused=True)
-                _finish_job(job_id, existing.id)
-                log.info("命中去重，跳过下载: %s", link)
-                return outcome
+            if track is None:
+                track = Track(platform=link.platform.value, video_id=link.video_id, audio_path=rel_path, source_url=link.url)
+                s.add(track)
 
-    # 3. 下载 + 转码
-    try:
-        result = get_extractor(link.platform).extract(link, cookie_file=_cookie_file_for(user_id, link.platform))
-    except NeedsLoginError as exc:
-        # 带着凭证还被要求登录 —— 说明这份凭证过期了，标记掉，
-        # 免得后续每次请求都拿它去撞同一堵墙
-        if user_id and credentials.load(user_id, link.platform.value):
-            credentials.mark_needs_reauth(user_id, link.platform.value, str(exc))
+            info = result.info
+            track.source_url = info.webpage_url or link.url
+            track.title = info.title
+            track.uploader = info.uploader
+            track.description = (info.description or "")[:20000] or None
+            track.thumbnail_url = info.thumbnail_url
+            track.upload_date = info.upload_date
+            track.duration_sec = info.duration_sec
+            track.audio_path = rel_path
+            track.audio_format = result.audio_format
+            track.audio_bytes = audio_bytes
+            track.audio_sha256 = digest
+            classification.apply(track, classified)
+            track.deleted = 0
+            track.updated_seq = next_updated_seq(s)
+            s.flush()
+            fingerprint.store(s, track, audio_fingerprint)
+            outcome = _to_outcome(track, reused=False)
+            track_id = track.id
+
+        _finish_job(job_id, track_id)
+        log.info("提取成功: %s -> %s (%.1f KB)", link, rel_path, audio_bytes / 1024)
+        return outcome
+    except Exception as exc:
         _fail(str(exc))
         raise
-    except ExtractorError as exc:
-        _fail(str(exc))
-        raise
-
-    # 4. 打标 + 算哈希
-    write_tags(result.audio_path, result.info)
-    audio_bytes = result.audio_path.stat().st_size
-    digest = _sha256(result.audio_path)
-    rel_path = str(result.audio_path.relative_to(settings.audio_dir))
-
-    # 5. 入库（upsert：force 重下时覆盖原记录，不产生第二条）
-    with session_scope() as s:
-        track = s.execute(
-            select(Track).where(
-                Track.platform == link.platform.value, Track.video_id == link.video_id
-            )
-        ).scalar_one_or_none()
-        if track is None:
-            track = Track(platform=link.platform.value, video_id=link.video_id, audio_path=rel_path, source_url=link.url)
-            s.add(track)
-
-        info = result.info
-        track.source_url = info.webpage_url or link.url
-        track.title = info.title
-        track.uploader = info.uploader
-        track.description = (info.description or "")[:20000] or None
-        track.thumbnail_url = info.thumbnail_url
-        track.upload_date = info.upload_date
-        track.duration_sec = info.duration_sec
-        track.audio_path = rel_path
-        track.audio_format = result.audio_format
-        track.audio_bytes = audio_bytes
-        track.audio_sha256 = digest
-        track.deleted = 0
-        track.updated_seq = next_updated_seq(s)
-        s.flush()
-        outcome = _to_outcome(track, reused=False)
-        track_id = track.id
-
-    _finish_job(job_id, track_id)
-    log.info("提取成功: %s -> %s (%.1f KB)", link, rel_path, audio_bytes / 1024)
-    return outcome
 
 
 def _finish_job(job_id: int, track_id: int) -> None:

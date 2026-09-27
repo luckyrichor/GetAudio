@@ -46,12 +46,7 @@ class LibraryViewModel(private val repo: TrackRepository) : ViewModel() {
     val tracks: StateFlow<List<TrackEntity>> =
         combine(query, platform, onlyFavorites) { q, p, fav -> Triple(q, p, fav) }
             .flatMapLatest { (q, p, fav) ->
-                when {
-                    fav -> repo.favorites()
-                    q.isNotBlank() -> repo.search(q)
-                    p != null -> repo.byPlatform(p)
-                    else -> repo.observeAll()
-                }
+                repo.filtered(q, p, fav)
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -124,7 +119,7 @@ fun LibraryScreen() {
             OutlinedTextField(
                 value = query,
                 onValueChange = vm::setQuery,
-                label = { Text("搜索标题或作者") },
+                label = { Text("搜索标题、作者或分类") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(16.dp, 8.dp),
             )
@@ -189,6 +184,17 @@ private fun TrackRow(track: TrackEntity, onPlay: () -> Unit, onFavorite: () -> U
         Column(Modifier.weight(1f)) {
             Text(track.title, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyLarge)
+            if (track.categories.isNotBlank()) {
+                Text(
+                    track.categories + when (track.hasVocal) {
+                        true -> " · 人声"
+                        false -> " · 无人声"
+                        null -> ""
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             Spacer(Modifier.height(2.dp))
             Text(
                 buildString {

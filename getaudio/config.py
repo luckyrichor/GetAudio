@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     http_timeout: float = 20.0
     max_redirects: int = 10
 
+    # 设置模型名才启用 AI；默认本地规则，不产生外部调用。
+    ollama_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = ""
+    classify_timeout: float = 60.0
+
     def ensure_dirs(self) -> None:
         for d in (self.audio_dir, self.tmp_dir, self.cookie_dir):
             d.mkdir(parents=True, exist_ok=True)

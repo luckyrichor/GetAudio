@@ -22,6 +22,9 @@ data class TrackEntity(
     val sourceUrl: String,
     val downloadUrl: String,
     val updatedSeq: Long,
+    val categories: String = "",
+    val hasVocal: Boolean? = null,
+    val classifyStage: String? = null,
 
     /** 本地文件路径；null 表示还没下载 */
     val localPath: String? = null,

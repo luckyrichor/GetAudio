@@ -161,6 +161,47 @@ def cmd_logout(args) -> int:
     return 3
 
 
+def cmd_duplicates(args) -> int:
+    import json
+    from .fingerprint import backfill, duplicates
+    if not 1 <= args.limit <= 5000:
+        print("limit 必须在 1 到 5000 之间", file=sys.stderr)
+        return 2
+    init_db()
+    if args.backfill:
+        backfill(args.limit)
+    print(json.dumps(duplicates(limit=args.limit), ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_crawl(args) -> int:
+    from pathlib import Path
+    from .scheduler import run, load_schedule
+    try:
+        if args.check:
+            schedule = load_schedule(Path(args.config))
+            print(f"配置有效：{len(schedule.groups)} 个任务组")
+            return 0
+        init_db()
+        run(Path(args.config), once=args.once, force=args.force)
+    except (ValueError, OSError) as exc:
+        print(f"抓取配置错误: {exc}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        return 0
+    return 0
+
+
+def cmd_classify(args) -> int:
+    from .classification import reclassify
+    if args.limit < 1:
+        print("limit 必须大于 0", file=sys.stderr)
+        return 2
+    init_db()
+    print(f"已更新 {reclassify(limit=args.limit, force=args.force)} 条分类")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -180,6 +221,24 @@ def main(argv: list[str] | None = None) -> int:
     pl = sub.add_parser("list", help="列出音频库")
     pl.add_argument("--limit", type=int, default=30)
     pl.set_defaults(func=cmd_list)
+
+    pd = sub.add_parser("duplicates", help="查找相似音频候选，不删除文件")
+    pd.add_argument("--limit", type=int, default=500)
+    pd.add_argument("--backfill", action="store_true", help="先为已有音频补指纹")
+    pd.set_defaults(func=cmd_duplicates)
+
+    from .config import ROOT
+    pw = sub.add_parser("crawl", help="定时抓取关键词与订阅链接")
+    pw.add_argument("--config", default=str(ROOT / "config/keywords.yaml"))
+    pw.add_argument("--once", action="store_true", help="只运行一轮到期任务")
+    pw.add_argument("--force", action="store_true", help="首轮忽略任务到期时间")
+    pw.add_argument("--check", action="store_true", help="仅验证配置，不访问平台")
+    pw.set_defaults(func=cmd_crawl)
+
+    pc = sub.add_parser("classify", help="补充已有音频的分类")
+    pc.add_argument("--limit", type=int, default=100)
+    pc.add_argument("--force", action="store_true")
+    pc.set_defaults(func=cmd_classify)
 
     plog = sub.add_parser("login", help="扫码登录（终端里直接显示二维码）")
     plog.add_argument("--user", required=True, help="用户 id")

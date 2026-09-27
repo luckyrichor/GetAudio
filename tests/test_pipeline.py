@@ -9,7 +9,7 @@ from getaudio import pipeline
 from getaudio.config import settings
 from getaudio.db import init_db, session_scope
 from getaudio.extractors.base import ExtractResult, MediaInfo
-from getaudio.models import ExtractJob, JobStatus, Track
+from getaudio.models import AudioFingerprint, ExtractJob, JobStatus, Track
 from getaudio.sharelink import Platform
 
 
@@ -52,6 +52,9 @@ def fake(monkeypatch):
     monkeypatch.setattr(pipeline, "ensure_guest_cookies", lambda _p: None)
     with session_scope() as s:
         s.query(ExtractJob).delete()
+        s.query(AudioFingerprint).filter(AudioFingerprint.track_id.in_(
+            s.query(Track.id).filter(Track.video_id == "BV0000000001")
+        )).delete(synchronize_session=False)
         s.query(Track).filter(Track.video_id == "BV0000000001").delete()
     yield ex
 
@@ -105,3 +108,15 @@ def test_bad_link_records_failed_job(fake):
         job = s.query(ExtractJob).order_by(ExtractJob.id.desc()).first()
         assert job.status is JobStatus.FAILED
         assert job.error
+
+
+def test_unexpected_failure_records_failed_job(fake, monkeypatch):
+    def fail(_path):
+        raise OSError("disk failure")
+    monkeypatch.setattr(pipeline, "_sha256", fail)
+    with pytest.raises(OSError):
+        pipeline.extract("https://www.bilibili.com/video/BV0000000001")
+    with session_scope() as s:
+        job = s.query(ExtractJob).order_by(ExtractJob.id.desc()).first()
+        assert job.status is JobStatus.FAILED
+        assert job.finished_at is not None

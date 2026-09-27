@@ -4,7 +4,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Iterator
 
-from sqlalchemy import create_engine, event, func, select
+from sqlalchemy import create_engine, event, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import settings
@@ -38,6 +38,9 @@ def init_db() -> None:
 def session_scope() -> Iterator[Session]:
     session = SessionLocal()
     try:
+        if session.bind.dialect.name == "sqlite":
+            # 先取得写锁再读取，保证 max+1 与提交顺序一致。
+            session.execute(text("BEGIN IMMEDIATE"))
         yield session
         session.commit()
     except Exception:
@@ -50,8 +53,8 @@ def session_scope() -> Iterator[Session]:
 def next_updated_seq(session: Session) -> int:
     """分配下一个同步游标值。
 
-    单调递增即可，不要求连续。SQLite 下靠 max+1；换 Postgres 时
-    应改成 sequence，避免并发下取到同值。
+    必须在 session_scope 写事务内调用。SQLite 的 BEGIN IMMEDIATE
+    将读取、分配与提交串行化，避免分页同步漏记录。
     """
     current = session.execute(select(func.max(Track.updated_seq))).scalar()
     return (current or 0) + 1
