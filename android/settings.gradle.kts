@@ -1,8 +1,10 @@
 pluginManagement {
     repositories {
         // 国内直连 google() 经常超时，镜像放前面
-        maven("https://mirrors.tencent.com/nexus/repository/maven-public/")
-        maven("https://maven.aliyun.com/repository/gradle-plugin")
+        if (System.getenv("CI") != "true") {
+            maven("https://mirrors.tencent.com/nexus/repository/maven-public/")
+            maven("https://maven.aliyun.com/repository/gradle-plugin")
+        }
         google()
         mavenCentral()
         gradlePluginPortal()
@@ -12,8 +14,10 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        maven("https://mirrors.tencent.com/nexus/repository/maven-public/")
-        maven("https://maven.aliyun.com/repository/public")
+        if (System.getenv("CI") != "true") {
+            maven("https://mirrors.tencent.com/nexus/repository/maven-public/")
+            maven("https://maven.aliyun.com/repository/public")
+        }
         google()
         mavenCentral()
     }
