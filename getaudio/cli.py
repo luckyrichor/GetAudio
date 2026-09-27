@@ -161,6 +161,20 @@ def cmd_logout(args) -> int:
     return 3
 
 
+def cmd_delete(args) -> int:
+    from .db import next_updated_seq
+    init_db()
+    with session_scope() as s:
+        track = s.get(Track, args.track_id)
+        if track is None or track.deleted:
+            print("音频不存在", file=sys.stderr)
+            return 2
+        track.deleted = 1
+        track.updated_seq = next_updated_seq(s)
+    print("已从音频库移除，下次同步会移除手机记录；服务器文件保留。")
+    return 0
+
+
 def cmd_duplicates(args) -> int:
     import json
     from .fingerprint import backfill, duplicates
@@ -221,6 +235,10 @@ def main(argv: list[str] | None = None) -> int:
     pl = sub.add_parser("list", help="列出音频库")
     pl.add_argument("--limit", type=int, default=30)
     pl.set_defaults(func=cmd_list)
+
+    pdel = sub.add_parser("delete", help="逻辑删除音频并同步删除标记")
+    pdel.add_argument("track_id", type=int)
+    pdel.set_defaults(func=cmd_delete)
 
     pd = sub.add_parser("duplicates", help="查找相似音频候选，不删除文件")
     pd.add_argument("--limit", type=int, default=500)

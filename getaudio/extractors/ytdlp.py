@@ -210,7 +210,5 @@ def _move_into_library(src: Path, info: MediaInfo) -> Path:
     dest_dir = settings.audio_dir / info.platform.value
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{info.video_id}-{safe_name(info.title)}{src.suffix.lower()}"
-    if dest.exists():
-        dest.unlink()
     shutil.move(str(src), str(dest))
     return dest

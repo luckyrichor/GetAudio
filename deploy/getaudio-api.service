@@ -1,0 +1,16 @@
+[Unit]
+Description=GetAudio HTTP API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/project/GetAudio
+ExecStart=/home/ubuntu/project/GetAudio/.venv/bin/uvicorn getaudio.api:app --host 127.0.0.1 --port 8800
+Restart=on-failure
+RestartSec=10
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

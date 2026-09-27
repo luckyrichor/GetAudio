@@ -2,7 +2,9 @@
 
 从 B 站 / 抖音提取音频，AI 打标分类，服务器持续更新，Android 端定期同步。
 
-**进度**：P0（链接提取）、P1（登录与凭证）、P4 骨架（Android App）已完成。P2/P3（AI 分类、定时抓取）待做。
+**当前可用**：链接提取、平台凭证、规则/可选 Ollama 文本分类、Chromaprint 相似曲目候选、持久化定时抓取，以及 Android 同步/分类搜索/下载/播放。
+
+当前为可信内网单机版本：分类依据标题与描述，不是音频听辨；跨平台相似结果仅供核对，不自动合并。平台联网能力受风控影响，具体实测见文末。
 
 ## 快速开始
 
@@ -67,10 +69,13 @@ getaudio/
     remux.py         无损抽轨（能拷贝就不重编码）
     probe.py         ffprobe 实测时长
     ytdlp.py         yt-dlp 通用实现（备选路径）
-  pipeline.py        编排：解析 → 查重 → 下载 → 打标 → 入库
+  classification.py  规则兜底 + Ollama 结构化文本分类
+  fingerprint.py     Chromaprint 相似音频候选
+  scheduler.py       配置校验、搜索、持久化调度、失败重试
+  pipeline.py        编排：解析 → 查重 → 下载 → 分类/指纹 → 打标 → 入库
   api.py / cli.py    HTTP 接口 / 命令行
 android/             Kotlin + Compose + Room + Media3 + WorkManager
-config/keywords.yaml 定时抓取关键词表（P3）
+config/keywords.yaml 定时抓取关键词和链接订阅
 ```
 
 ## 几个不显然的设计决定
@@ -96,7 +101,7 @@ config/keywords.yaml 定时抓取关键词表（P3）
 
 ### 凭证：加密 + AAD 绑定
 
-登录 cookie 等同于账号本身，AES-GCM 加密后存库，密钥只从环境变量读。附加认证数据绑定 `user_id:platform` —— 把 A 的密文挪到 B 名下会直接解密失败，防的是数据库被改写后的串用。
+登录 cookie 等同于账号本身，AES-GCM 加密后存库，正式环境的密钥从环境变量读；未设置时本地开发密钥保存在 `data/.secret_key`（权限 600，已忽略入库）。附加认证数据绑定 `user_id:platform` —— 把 A 的密文挪到 B 名下会直接解密失败，防的是数据库被改写后的串用。
 
 ### 同步：服务器单向权威
 
@@ -114,7 +119,7 @@ App 本地只保留「已下载路径」和「收藏」两个本地状态，同�
 ## 测试
 
 ```bash
-.venv/bin/python -m pytest tests/ -q     # 79 个
+.venv/bin/python -m pytest tests/ -q     # 当前 108 个
 ```
 
 包含一组 **API 契约测试**：解析 Kotlin 的 `@Serializable data class`，和服务端 Pydantic 模型逐字段对齐。字段名对不上不会在编译期暴露，只会在用户手机上炸 —— 这组用例把它挡在 CI 里。
@@ -125,7 +130,61 @@ App 本地只保留「已下载路径」和「收藏」两个本地状态，同�
 
 - 抖音 Web 接口反爬改得很勤，`douyin.py` 是全项目最脆的一块。坏掉时先看 detail 接口返回的 `filter_reason`
 - 抖音扫码登录走不通，只能导入 cookie
-- SQLite 的同步游标用 `max+1` 分配，并发写有取到同值的风险；换 Postgres 时要改成 sequence
-- 跨平台的同一首歌目前去不了重（只按 `platform + video_id`），音频指纹在 P2
-- Android 端未在真机/模拟器上跑过 —— 构建通过、接口契约已校验，但交互路径需要实机验证
+- SQLite 写事务通过 `BEGIN IMMEDIATE` 串行分配同步游标；当前仅验证 SQLite，切换其他数据库需重新设计与验证提交顺序
+- 相同平台/视频自动去重；Chromaprint 可提示跨平台相似候选，但片段剪辑、静音、较大起始偏移不保证识别，不自动删除来源
+- Android 构建通过、接口字段契约已校验；尚未做真机/模拟器交互和 Room 迁移实测，不能用编译通过替代实机验收
 - **合规**：扒 B 站 / 抖音音频两边 ToS 都不允许。自用风险不大，做成多用户服务或再分发则不然
+
+
+## 分类与相似音频
+
+默认使用本地规则，`classify_stage=rules`。启用 AI 时复制 `.env.example` 为 `.env`，将 `GETAUDIO_OLLAMA_MODEL` 设为你已下载的模型名。服务调用 [Ollama chat 接口](https://docs.ollama.com/api/chat) 的 JSON schema 输出；失败或输出不合规时降级规则，成功标记 `ai`。`has_vocal=null` 表示没有足够证据。
+
+```bash
+# 为旧音频补分类（默认最多 100 条）；重算已完成 AI 分类可加 --force
+.venv/bin/python -m getaudio.cli classify --limit 100
+# 为旧音频补指纹，列出相似候选；不会删除或合并记录
+.venv/bin/python -m getaudio.cli duplicates --backfill --limit 500
+# 逻辑删除指定条目：手机下次同步接收 tombstone；服务器文件保留
+.venv/bin/python -m getaudio.cli delete 123
+```
+
+新提取音频会自动分类并计算指纹。指纹使用前 120 秒，缺少 Chromaprint 的 ffmpeg 会跳过并记录日志。Android 显示类别和人声判断，搜索框可搜类别，平台、搜索和收藏条件可组合。v1→v2 数据库升级保留收藏；下载使用文件大小和 SHA-256 校验，源音频变更后重新下载。
+
+## 定时抓取
+
+```bash
+.venv/bin/python -m getaudio.cli crawl --check           # 只校验 YAML，不触网
+.venv/bin/python -m getaudio.cli crawl --once            # 执行到期任务一轮
+.venv/bin/python -m getaudio.cli crawl --once --force    # 忽略到期时间
+.venv/bin/python -m getaudio.cli crawl                   # 每 30 秒检查到期任务
+```
+
+`keywords` 使用 yt-dlp 的 `bilisearch`（只搜索 B 站），`urls` 可填写 B 站或抖音分享链接。`top_n` 是每组每轮的总提取上限；关键词结果交错选取并去重。周期支持 `m/h/d`，可设置 `enabled: false` 暂停某组，`user_id` 指定提取凭证。
+
+```yaml
+groups:
+  - name: 我的链接
+    interval: 12h
+    top_n: 5
+    urls:
+      - https://www.bilibili.com/video/实际BV号/
+    enabled: true
+```
+
+调度状态写入 `crawl_state`，重启保留进度；部分失败不妨碍其余链接，失败组最多五分钟后重试。同一临时目录上的多个 worker 用文件锁互斥。只支持单机工作目录共享场景，不是分布式调度。使用独立 worker，不在每个 Uvicorn 进程里重复启动。
+
+## 运行与部署
+
+提供 `deploy/` 下的 systemd 模板，默认路径为 `/home/ubuntu/project/GetAudio`、用户为 `ubuntu`。按机器实际情况调整后安装；开发过程没有自动启用常驻抓取，也没有批量下载默认关键词结果。API 模板默认监听回环地址，手机访问需配置可信内网入口。当前 API 没有独立访问鉴权，不应直接暴露到公网。
+
+首次启动会自动新增调度、指纹表，不修改原 tracks 列。备份应包含 SQLite 数据库（使用 SQLite backup 方式取得一致快照）、音频目录和加密密钥；丢失密钥后凭证无法恢复。
+
+## 本轮验证（2026-09-27）
+
+- Python 回归覆盖分类输出校验、AI 超时降级、任务周期/重试/互斥、真实音频指纹、并发同步游标和提取失败记录；测试数据与真实库隔离。
+- Android `assembleDebug` 成功；`testDebugUnitTest` 没有 JVM 测试用例，不计作手机运行验证。
+- 当前主机 B 站关键词搜索实测返回 HTTP 412；已实现错误记录与重试，真实搜索成功路径尚待网络/凭证条件允许后验证。抖音关键词搜索未实现，只支持订阅链接提取。
+- 未配置 Ollama 模型，真实模型推断尚未验证；已用模拟 HTTP 响应验证请求协议、校验和降级行为。
+
+GitHub Actions 对推送运行 Python 测试和 Android 构建。

@@ -9,10 +9,15 @@ import com.getaudio.app.data.remote.TrackDto
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.security.MessageDigest
 import okhttp3.Request
 import java.io.File
 
 class TrackRepository(private val context: Context) {
+
+    companion object { private val fileMutex = Mutex() }
 
     private val db = AppDatabase.get(context)
     private val trackDao = db.trackDao()
@@ -41,7 +46,7 @@ class TrackRepository(private val context: Context) {
             val api = ApiProvider.api(settings.serverUrlNow())
             val resp = api.extract(ExtractRequest(text = text, userId = settings.userId()))
             val entity = resp.track.toEntity()
-            trackDao.applySync(listOf(entity), emptyList())
+            fileMutex.withLock { trackDao.applySync(listOf(entity), emptyList()) }
             sync()
             trackDao.byId(entity.id) ?: entity
         }
@@ -50,7 +55,7 @@ class TrackRepository(private val context: Context) {
     // ---------- 同步 ----------
 
     /** 增量拉取，返回本次新增/更新的条数。 */
-    suspend fun sync(): Int = withContext(Dispatchers.IO) {
+    suspend fun sync(): Int = withContext(Dispatchers.IO) { fileMutex.withLock {
         val api = ApiProvider.api(settings.serverUrlNow())
         var cursor = syncDao.cursor()
         var total = 0
@@ -71,7 +76,7 @@ class TrackRepository(private val context: Context) {
             if (!page.hasMore) break
         }
         total
-    }
+    } }
 
     // ---------- 下载 ----------
 
@@ -79,11 +84,12 @@ class TrackRepository(private val context: Context) {
 
     /** 下载单条音频到本地。已经有了就直接返回。 */
     suspend fun download(track: TrackEntity): Result<File> = runCatching {
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO) { fileMutex.withLock {
+            val current = trackDao.byId(track.id) ?: error("音频已被移除，请重新同步")
             val dest = localFile(track.id)
-            if (dest.exists() && dest.length() > 0) {
+            if (current.localPath == dest.absolutePath && dest.exists() && dest.length() > 0) {
                 if (track.localPath == null) trackDao.setLocalPath(track.id, dest.absolutePath)
-                return@withContext dest
+                return@withLock dest
             }
 
             val base = settings.serverUrlNow().trimEnd('/')
@@ -97,13 +103,28 @@ class TrackRepository(private val context: Context) {
                 val body = resp.body ?: error("下载失败：响应为空")
                 tmp.outputStream().use { out -> body.byteStream().copyTo(out) }
             }
+            val digest = MessageDigest.getInstance("SHA-256")
+            tmp.inputStream().use { input ->
+                val buffer = ByteArray(65536)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    digest.update(buffer, 0, count)
+                }
+            }
+            val actualHash = digest.digest().joinToString("") { "%02x".format(it) }
+            if ((current.audioBytes != null && tmp.length() != current.audioBytes) ||
+                (current.audioSha256 != null && actualHash != current.audioSha256)) {
+                tmp.delete()
+                error("音频内容已变更或下载不完整，请同步后重试")
+            }
             if (!tmp.renameTo(dest)) {
                 tmp.delete()
                 error("保存失败")
             }
             trackDao.setLocalPath(track.id, dest.absolutePath)
             dest
-        }
+        } }
     }
 
     /** 批量补齐未下载的音频，返回成功条数。给 WorkManager 用。 */
@@ -128,6 +149,7 @@ private fun TrackDto.toEntity() = TrackEntity(
     sourceUrl = sourceUrl,
     downloadUrl = downloadUrl,
     updatedSeq = updatedSeq,
+    audioSha256 = audioSha256,
     categories = categories.joinToString(" · "),
     hasVocal = hasVocal,
     classifyStage = classifyStage,

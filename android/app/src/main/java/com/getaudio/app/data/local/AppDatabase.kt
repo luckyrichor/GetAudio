@@ -21,6 +21,7 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE tracks ADD COLUMN categories TEXT NOT NULL DEFAULT ''")
                 db.execSQL("ALTER TABLE tracks ADD COLUMN hasVocal INTEGER")
+                db.execSQL("ALTER TABLE tracks ADD COLUMN audioSha256 TEXT")
                 db.execSQL("ALTER TABLE tracks ADD COLUMN classifyStage TEXT")
             }
         }

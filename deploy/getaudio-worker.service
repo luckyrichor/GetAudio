@@ -1,0 +1,17 @@
+[Unit]
+Description=GetAudio scheduled crawler
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/project/GetAudio
+ExecStart=/home/ubuntu/project/GetAudio/.venv/bin/python -m getaudio.cli crawl
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=120
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

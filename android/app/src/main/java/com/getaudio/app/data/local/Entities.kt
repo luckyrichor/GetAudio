@@ -22,6 +22,7 @@ data class TrackEntity(
     val sourceUrl: String,
     val downloadUrl: String,
     val updatedSeq: Long,
+    val audioSha256: String? = null,
     val categories: String = "",
     val hasVocal: Boolean? = null,
     val classifyStage: String? = null,

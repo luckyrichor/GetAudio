@@ -65,6 +65,7 @@ class TrackOut(BaseModel):
     duration_sec: float | None
     audio_bytes: int | None
     audio_format: str
+    audio_sha256: str | None = None
     source_url: str
     updated_seq: int
     deleted: bool
@@ -87,6 +88,7 @@ class TrackOut(BaseModel):
             duration_sec=t.duration_sec,
             audio_bytes=t.audio_bytes,
             audio_format=t.audio_format,
+            audio_sha256=t.audio_sha256,
             source_url=t.source_url,
             updated_seq=t.updated_seq,
             deleted=bool(t.deleted),

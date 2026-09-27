@@ -120,3 +120,13 @@ def test_unexpected_failure_records_failed_job(fake, monkeypatch):
         job = s.query(ExtractJob).order_by(ExtractJob.id.desc()).first()
         assert job.status is JobStatus.FAILED
         assert job.finished_at is not None
+
+
+def test_concurrent_same_video_downloads_once(fake):
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        outcomes = list(pool.map(lambda _: pipeline.extract(
+            "https://www.bilibili.com/video/BV0000000001"), range(4)))
+    assert fake.calls == 1
+    assert sum(not out.reused for out in outcomes) == 1
+    assert len({out.track_id for out in outcomes}) == 1

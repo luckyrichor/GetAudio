@@ -56,7 +56,10 @@ interface TrackDao {
         val merged = incoming.map { fresh ->
             val existing = byId(fresh.id)
             if (existing == null) fresh
-            else fresh.copy(localPath = existing.localPath, favorite = existing.favorite)
+            else fresh.copy(
+                localPath = existing.localPath.takeIf { existing.audioSha256 == fresh.audioSha256 },
+                favorite = existing.favorite,
+            )
         }
         upsertAll(merged)
     }
