@@ -1,0 +1,82 @@
+package com.getaudio.app.ui.screen
+
+import android.content.Context
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.getaudio.app.data.repo.Settings
+import kotlinx.coroutines.launch
+
+class SettingsViewModel(private val settings: Settings) : ViewModel() {
+
+    var serverUrl by mutableStateOf("")
+    var userId by mutableStateOf("")
+        private set
+    var saved by mutableStateOf(false)
+        private set
+
+    init {
+        viewModelScope.launch {
+            serverUrl = settings.serverUrlNow()
+            userId = settings.userId()
+        }
+    }
+
+    fun save() = viewModelScope.launch {
+        settings.setServerUrl(serverUrl)
+        serverUrl = settings.serverUrlNow()
+        saved = true
+    }
+
+    fun ack() { saved = false }
+
+    class Factory(private val context: Context) : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+            SettingsViewModel(Settings(context)) as T
+    }
+}
+
+@Composable
+fun SettingsScreen() {
+    val context = LocalContext.current
+    val vm: SettingsViewModel = viewModel(factory = SettingsViewModel.Factory(context))
+
+    Column(
+        Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("设置", style = MaterialTheme.typography.titleMedium)
+
+        OutlinedTextField(
+            value = vm.serverUrl,
+            onValueChange = { vm.serverUrl = it; vm.ack() },
+            label = { Text("服务器地址") },
+            supportingText = { Text("例如 http://192.168.1.10:8800") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(onClick = vm::save) { Text(if (vm.saved) "已保存" else "保存") }
+
+        HorizontalDivider()
+
+        Text("本机用户 id", style = MaterialTheme.typography.titleSmall)
+        Text(
+            vm.userId,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            "服务器用它区分各人的平台凭证。换设备想沿用同一份凭证的话，把这串填到新设备上。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
