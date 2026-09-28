@@ -35,8 +35,6 @@ class ExtractViewModel(private val repo: TrackRepository, private val version: S
         private set
     var diagnostics by mutableStateOf<List<String>>(emptyList())
         private set
-    var directFailed by mutableStateOf(false)
-        private set
     var usingServer by mutableStateOf(false)
         private set
     private var startedAt = 0L
@@ -52,16 +50,14 @@ class ExtractViewModel(private val repo: TrackRepository, private val version: S
         viewModelScope.launch {
             busy = true
             usingServer = false
-            directFailed = false
             error = null
             result = null
             startedAt = SystemClock.elapsedRealtime()
             diagnostics = listOf("GetAudio $version · 手机直提取（未使用 GetAudio 服务器）")
             repo.extract(text, ::record)
-                .onSuccess { result = it; input = "" }
+                .onSuccess { result = it }
                 .onFailure {
                     error = ApiProvider.humanMessage(it)
-                    directFailed = true
                     record("提取失败：${it.javaClass.simpleName}")
                 }
             busy = false
@@ -70,18 +66,19 @@ class ExtractViewModel(private val repo: TrackRepository, private val version: S
 
     fun submitViaServer() {
         val text = input.trim()
-        if (text.isEmpty() || busy || !directFailed) return
+        if (text.isEmpty() || busy) return
         viewModelScope.launch {
             busy = true
             usingServer = true
             error = null
+            result = null
+            if (diagnostics.isEmpty()) {
+                startedAt = SystemClock.elapsedRealtime()
+                diagnostics = listOf("GetAudio $version · 手动服务器提取")
+            }
             record("手动选择服务器提取")
             repo.extractViaServer(text, ::record)
-                .onSuccess {
-                    result = it
-                    input = ""
-                    directFailed = false
-                }
+                .onSuccess { result = it }
                 .onFailure {
                     error = ApiProvider.humanMessage(it)
                     record("服务器提取失败：${it.javaClass.simpleName}")
@@ -174,16 +171,14 @@ fun ExtractScreen(prefill: String? = null, onSharedConsumed: () -> Unit = {}) {
             }
         }
 
-        if (vm.directFailed) {
-            OutlinedButton(onClick = vm::submitViaServer, enabled = !vm.busy && vm.input.isNotBlank()) {
-                Text("通过服务器提取")
-            }
-            Text(
-                "仅点击此按钮才会将分享文本发给设置中的服务器；需要先填写并保存服务器地址。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        OutlinedButton(onClick = vm::submitViaServer, enabled = !vm.busy && vm.input.isNotBlank()) {
+            Text("通过服务器提取（可选）")
         }
+        Text(
+            "仅点击此按钮才会将分享文本发给设置中的服务器；需要先填写并保存服务器地址。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 
         vm.result?.let { t ->
             Card {
