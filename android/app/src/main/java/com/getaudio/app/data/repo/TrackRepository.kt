@@ -41,10 +41,13 @@ class TrackRepository(private val context: Context) {
     // ---------- 提取 ----------
 
     /** 分享文本由手机直接提取，保存到本地库，不依赖 GetAudio 服务器。 */
-    suspend fun extract(text: String): Result<TrackEntity> = runCatching {
+    suspend fun extract(text: String, onDiagnostic: (String) -> Unit = {}): Result<TrackEntity> = runCatching {
         withContext(Dispatchers.IO) {
-            val entity = DirectExtractor(context).extract(text)
+            val entity = DirectExtractor(context) { line ->
+                withContext(Dispatchers.Main) { onDiagnostic(line) }
+            }.extract(text)
             fileMutex.withLock { trackDao.upsertLocal(entity) }
+            withContext(Dispatchers.Main) { onDiagnostic("已加入本地音频库") }
             entity
         }
     }

@@ -25,7 +25,10 @@ import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
 
 /** Public-link extraction on the phone. No GetAudio server is involved. */
-class DirectExtractor(private val context: Context) {
+class DirectExtractor(
+    private val context: Context,
+    private val report: suspend (String) -> Unit = {},
+) {
     private val cookies = MemoryCookies()
     private val client = OkHttpClient.Builder()
         .cookieJar(cookies)
@@ -35,7 +38,9 @@ class DirectExtractor(private val context: Context) {
         .build()
 
     suspend fun extract(text: String): TrackEntity = withContext(Dispatchers.IO) {
+        report("开始解析分享内容")
         val link = resolve(text)
+        report("已识别平台：${if (link.platform == "douyin") "抖音" else "B 站"}")
         val id = localId(link.platform, link.key)
         val audioDir = File(context.filesDir, "audio").apply { mkdirs() }
         val dest = File(audioDir, "$id.audio")
@@ -43,12 +48,15 @@ class DirectExtractor(private val context: Context) {
             "douyin" -> douyin(link)
             else -> bilibili(link)
         }
+        report("已取得媒体信息，可尝试地址 ${media.urls.size} 个")
         val work = File.createTempFile("getaudio-", ".source", context.cacheDir)
         val output = File.createTempFile("getaudio-", ".m4a", context.cacheDir)
         val staged = File(audioDir, "$id.audio.part")
         try {
             download(media.urls, work, media.referer)
+            report("媒体下载完成：${work.length()} 字节")
             val format = audioOnly(work, output)
+            report("音轨处理完成：$format")
             val ready = if (output.length() > 1024) output else work
             val hash = sha256(ready)
             // Replace only after the complete audio has been downloaded and validated.
@@ -57,6 +65,7 @@ class DirectExtractor(private val context: Context) {
                 staged.delete()
                 error("无法保存音频")
             }
+            report("音频文件已保存：${dest.length()} 字节")
             TrackEntity(
                 id = id, platform = link.platform, videoId = link.key,
                 title = media.title, uploader = media.uploader,
@@ -77,12 +86,15 @@ class DirectExtractor(private val context: Context) {
         val referer: String,
     )
 
-    private fun resolve(text: String): DirectLink {
+    private suspend fun resolve(text: String): DirectLink {
         val raw = DirectLinkParser.find(text)
         val rawHost = raw.toHttpUrlOrNull()?.host ?: error("分享链接无效")
         val isShort = rawHost in setOf("b23.tv", "bili2233.cn", "v.douyin.com", "v.iesdouyin.com")
+        report("分享地址域名：$rawHost")
         val url = if (isShort) client.newCall(Request.Builder().url(raw)
             .header("User-Agent", BROWSER_UA).get().build()).execute().use {
+            report("短链展开：HTTP ${it.code}，最终域名 ${it.request.url.host}")
+            if (!it.isSuccessful) throw PlatformHttpException("短链展开", it.code)
             it.request.url.toString()
         } else raw
         return DirectLinkParser.parse(url)
@@ -91,34 +103,48 @@ class DirectExtractor(private val context: Context) {
     private suspend fun douyin(link: DirectLink): Media {
         val ua = BROWSER_UA
         // The home page can be blocked even when the detail API is available.
-        runCatching { get("https://www.douyin.com/", ua = ua, stage = "抖音首页") }
+        try {
+            get("https://www.douyin.com/", ua = ua, stage = "抖音首页")
+            report("抖音首页：请求成功")
+        } catch (e: Exception) {
+            report("抖音首页：${failureKind(e)}（继续尝试）")
+        }
         val token = ByteArray(81).also(SecureRandom()::nextBytes)
         val msToken = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(token)
         cookies.put("douyin.com", "msToken", msToken)
         val body = """{"region":"cn","aid":1768,"needFid":false,"service":"www.ixigua.com","migrate_info":{"ticket":"","source":"node"},"cbUrlProtocol":"https","union":true}"""
-        runCatching {
+        try {
             val request = Request.Builder().url("https://ttwid.bytedance.com/ttwid/union/register/")
                 .header("User-Agent", ua).post(body.toRequestBody("application/json".toMediaType())).build()
             client.newCall(request).execute().use { response ->
                 Cookie.parseAll(response.request.url, response.headers)
                     .firstOrNull { it.name == "ttwid" }?.let { cookies.put("douyin.com", "ttwid", it.value) }
+                report("访客凭证：HTTP ${response.code}，ttwid ${if (cookies.has("ttwid")) "已取得" else "未取得"}")
             }
+        } catch (e: Exception) {
+            report("访客凭证：${failureKind(e)}（继续尝试）")
         }
         val url = "https://www.douyin.com/aweme/v1/web/aweme/detail/?device_platform=webapp&aid=6383" +
             "&channel=channel_pc_web&pc_client_type=1&version_code=170400&version_name=17.4.0" +
             "&cookie_enabled=true&platform=PC&downlink=10&aweme_id=${link.videoId}"
         val response = try {
-            JSONObject(get(url, ua = ua, referer = link.url, stage = "抖音作品详情"))
+            val json = get(url, ua = ua, referer = link.url, stage = "抖音作品详情")
+            report("作品详情直连：请求成功，响应 ${json.length} 字符")
+            JSONObject(json)
         } catch (e: Exception) {
+            report("作品详情直连：${failureKind(e)}")
             if (e is PlatformHttpException && e.code != 403) throw e
             if (e !is PlatformHttpException && e !is org.json.JSONException) throw e
             val browserCookies = cookies.loadForRequest("https://www.douyin.com/".toHttpUrlOrNull()!!)
             val credentialHint = if (browserCookies.none { it.name == "ttwid" }) "；未取得抖音访客凭证" else ""
-            runCatching { DouyinBrowserDetail.fetch(context, link.videoId, url, ua, browserCookies) }
+            report("浏览器重试：开始，ttwid ${if (browserCookies.any { it.name == "ttwid" }) "有" else "无"}")
+            runCatching { DouyinBrowserDetail.fetch(context, link.videoId, url, ua, browserCookies, report) }
                 .getOrElse { browserError ->
+                    report("浏览器重试：${failureKind(browserError)}")
                     error("抖音作品详情请求失败（${e.message}$credentialHint），浏览器重试也失败：${browserError.message}")
                 }
         }
+        report("作品详情内容：status_code=${response.optInt("status_code", -1)}，作品数据${if (response.optJSONObject("aweme_detail") == null) "缺失" else "存在"}")
         val detail = response.optJSONObject("aweme_detail")
             ?: error("抖音没有返回作品信息；可能需要登录，或该作品不可见")
         val video = detail.optJSONObject("video")
@@ -134,6 +160,7 @@ class DirectExtractor(private val context: Context) {
         val useMusic = musicUrls.isNotEmpty() && (videoSeconds <= 0 || musicSeconds <= 0 ||
             musicSeconds >= videoSeconds * 0.9 || videoUrls.isEmpty())
         val selected = if (useMusic) musicUrls else videoUrls.ifEmpty { musicUrls }
+        report("媒体候选：音乐 ${musicUrls.size} 个，视频 ${videoUrls.size} 个；使用${if (useMusic) "音乐" else "视频音轨"}")
         require(selected.isNotEmpty()) { "抖音没有返回可下载地址" }
         val title = music?.optString("title")?.takeIf(String::isNotBlank)
             ?: detail.optString("desc").take(60).ifBlank { "抖音 ${link.videoId}" }
@@ -141,7 +168,8 @@ class DirectExtractor(private val context: Context) {
             selected.distinct(), "https://www.douyin.com/")
     }
 
-    private fun bilibili(link: DirectLink): Media {
+    private suspend fun bilibili(link: DirectLink): Media {
+        report("B 站：开始请求作品与音轨信息")
         get("https://www.bilibili.com/", ua = BROWSER_UA)
         get("https://api.bilibili.com/x/frontend/finger/spi", ua = BROWSER_UA)
         val param = if (link.videoId.startsWith("av", true)) "aid=${link.videoId.drop(2)}" else "bvid=${link.videoId}"
@@ -171,6 +199,7 @@ class DirectExtractor(private val context: Context) {
             .maxByOrNull { it.optLong("bandwidth") } ?: error("B 站没有可用音轨")
         val selected = listOfNotNull(track.optString("baseUrl").takeIf(String::isNotBlank)) +
             strings(track.optJSONArray("backupUrl"))
+        report("B 站音轨：取得 ${selected.size} 个候选地址")
         val part = pages?.optJSONObject(link.page - 1)?.optString("part").orEmpty()
         val title = item.optString("title").ifBlank { "B 站 ${link.videoId}" } +
             if (link.page > 1) " - P${link.page} $part" else ""
@@ -192,12 +221,13 @@ class DirectExtractor(private val context: Context) {
     private class PlatformHttpException(stage: String, val code: Int) :
         IllegalStateException("$stage 请求失败：HTTP $code")
 
-    private fun download(urls: List<String>, dest: File, referer: String) {
+    private suspend fun download(urls: List<String>, dest: File, referer: String) {
         var last: Exception? = null
-        for (url in urls) {
+        for ((index, url) in urls.withIndex()) {
             try {
                 client.newCall(Request.Builder().url(url).header("User-Agent", BROWSER_UA)
                     .header("Referer", referer).build()).execute().use { response ->
+                    report("媒体下载 ${index + 1}/${urls.size}：HTTP ${response.code}")
                     require(response.isSuccessful) { "下载失败：HTTP ${response.code}" }
                     dest.outputStream().use { out ->
                         response.body?.byteStream()?.copyTo(out) ?: error("下载内容为空")
@@ -205,7 +235,10 @@ class DirectExtractor(private val context: Context) {
                 }
                 require(dest.length() > 1024) { "下载内容过小" }
                 return
-            } catch (e: Exception) { last = e }
+            } catch (e: Exception) {
+                last = e
+                report("媒体下载 ${index + 1}/${urls.size}：${failureKind(e)}")
+            }
         }
         throw IllegalStateException("所有下载地址均失败：${last?.message}", last)
     }
@@ -281,6 +314,11 @@ class DirectExtractor(private val context: Context) {
     }
 
     private fun urls(obj: JSONObject?): List<String> = strings(obj?.optJSONArray("url_list"))
+    private fun failureKind(error: Throwable): String = when (error) {
+        is PlatformHttpException -> "HTTP ${error.code}"
+        else -> Regex("HTTP (\\d{3})").find(error.message.orEmpty())?.value
+            ?: error.javaClass.simpleName
+    }
     private fun strings(arr: org.json.JSONArray?): List<String> = if (arr == null) emptyList() else
         (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.startsWith("http") } }
 
@@ -302,6 +340,7 @@ class DirectExtractor(private val context: Context) {
             val cookie = Cookie.Builder().name(name).value(value).domain(domain).build()
             saveFromResponse("https://$domain".toHttpUrlOrNull()!!, listOf(cookie))
         }
+        @Synchronized fun has(name: String): Boolean = jar.any { it.name == name }
     }
 
     companion object {

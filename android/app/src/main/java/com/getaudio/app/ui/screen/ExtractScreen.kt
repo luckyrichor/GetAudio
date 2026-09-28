@@ -1,7 +1,9 @@
 package com.getaudio.app.ui.screen
 
 import android.content.ClipboardManager
+import android.content.ClipData
 import android.content.Context
+import android.os.SystemClock
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -22,7 +24,7 @@ import com.getaudio.app.ui.formatSize
 import com.getaudio.app.ui.platformLabel
 import kotlinx.coroutines.launch
 
-class ExtractViewModel(private val repo: TrackRepository) : ViewModel() {
+class ExtractViewModel(private val repo: TrackRepository, private val version: String) : ViewModel() {
 
     var input by mutableStateOf("")
     var busy by mutableStateOf(false)
@@ -31,6 +33,14 @@ class ExtractViewModel(private val repo: TrackRepository) : ViewModel() {
         private set
     var error by mutableStateOf<String?>(null)
         private set
+    var diagnostics by mutableStateOf<List<String>>(emptyList())
+        private set
+    private var startedAt = 0L
+
+    private fun record(message: String) {
+        val seconds = (SystemClock.elapsedRealtime() - startedAt) / 1000
+        diagnostics = (diagnostics + "[+${seconds}s] $message").takeLast(60)
+    }
 
     fun submit() {
         val text = input.trim()
@@ -39,9 +49,14 @@ class ExtractViewModel(private val repo: TrackRepository) : ViewModel() {
             busy = true
             error = null
             result = null
-            repo.extract(text)
+            startedAt = SystemClock.elapsedRealtime()
+            diagnostics = listOf("GetAudio $version · 手机直提取（未使用 GetAudio 服务器）")
+            repo.extract(text, ::record)
                 .onSuccess { result = it; input = "" }
-                .onFailure { error = ApiProvider.humanMessage(it) }
+                .onFailure {
+                    error = ApiProvider.humanMessage(it)
+                    record("提取失败：${it.javaClass.simpleName}")
+                }
             busy = false
         }
     }
@@ -64,7 +79,10 @@ class ExtractViewModel(private val repo: TrackRepository) : ViewModel() {
     class Factory(private val context: Context) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            ExtractViewModel(TrackRepository(context)) as T
+            ExtractViewModel(
+                TrackRepository(context),
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "未知版本",
+            ) as T
     }
 }
 
@@ -139,6 +157,27 @@ fun ExtractScreen(prefill: String? = null, onSharedConsumed: () -> Unit = {}) {
                     )
                     Text("已加入音频库，去「音频库」页播放。",
                         style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+
+        if (vm.diagnostics.isNotEmpty()) {
+            Card {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("提取诊断", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "遇到失败时复制下面的信息发给开发者。只记录步骤、状态码和大小，不记录 Cookie 或完整媒体地址。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    vm.diagnostics.forEach { line ->
+                        Text(line, style = MaterialTheme.typography.bodySmall)
+                    }
+                    OutlinedButton(onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText(
+                            "GetAudio 提取诊断", vm.diagnostics.joinToString("\n"),
+                        ))
+                    }) { Text("复制诊断") }
                 }
             }
         }
