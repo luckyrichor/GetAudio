@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,6 +29,9 @@ class Settings(BaseSettings):
     # 设置模型名才启用 AI；默认本地规则，不产生外部调用。
     ollama_url: str = "http://127.0.0.1:11434"
     ollama_model: str = ""
+    ark_api_key: str = Field(default="", validation_alias="ARK_API_KEY")
+    ark_url: str = "https://ark.cn-beijing.volces.com/api/v3"
+    ark_models: str = "doubao-seed-2-0-mini-260428,doubao-seed-2-1-pro-260915"
     classify_timeout: float = 60.0
 
     def ensure_dirs(self) -> None:

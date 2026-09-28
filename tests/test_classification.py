@@ -16,6 +16,7 @@ def info(title):
 @pytest.fixture(autouse=True)
 def no_model(monkeypatch):
     monkeypatch.setattr(settings, "ollama_model", "")
+    monkeypatch.setattr(settings, "ark_api_key", "")
 
 
 @pytest.mark.parametrize("title,categories,vocal", [
@@ -62,6 +63,36 @@ def test_model_timeout_falls_back(monkeypatch):
         raise httpx.ReadTimeout("test")
     monkeypatch.setattr(c.httpx, "post", timeout)
     assert c.classify(info("治愈")).categories == ["治愈"]
+
+
+def test_ark_tries_next_model_and_validates_result(monkeypatch):
+    monkeypatch.setattr(settings, "ark_api_key", "test-key")
+    monkeypatch.setattr(settings, "ark_models", "first,second")
+    called = []
+
+    def post(url, **kwargs):
+        model = kwargs["json"]["model"]
+        called.append(model)
+        assert kwargs["headers"]["Authorization"] == "Bearer test-key"
+        assert kwargs["json"]["response_format"]["type"] == "json_schema"
+        if model == "first":
+            return httpx.Response(404, request=httpx.Request("POST", url), json={"error": {"code": "ModelNotOpen"}})
+        return httpx.Response(200, request=httpx.Request("POST", url), json={
+            "choices": [{"message": {"content": json.dumps({"categories": ["钢琴", "钢琴"], "has_vocal": None})}}]})
+
+    monkeypatch.setattr(c.httpx, "post", post)
+    result = c.classify(info("sample"))
+    assert called == ["first", "second"]
+    assert result.categories == ["钢琴"]
+    assert result.stage == "ai"
+
+
+def test_ark_unavailable_falls_back_to_rules(monkeypatch):
+    monkeypatch.setattr(settings, "ark_api_key", "test-key")
+    monkeypatch.setattr(settings, "ark_models", "first,second")
+    monkeypatch.setattr(c.httpx, "post", lambda url, **kw: httpx.Response(
+        429, request=httpx.Request("POST", url)))
+    assert c.classify(info("治愈钢琴")).categories == ["治愈", "钢琴"]
 
 
 def test_backfill_updates_sync_only_when_changed():

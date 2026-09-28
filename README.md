@@ -142,7 +142,7 @@ cd android && ./gradlew testDebugUnitTest assembleDebug
 
 ## 分类与相似音频
 
-默认使用本地规则，`classify_stage=rules`。启用 AI 时复制 `.env.example` 为 `.env`，将 `GETAUDIO_OLLAMA_MODEL` 设为你已下载的模型名。服务调用 [Ollama chat 接口](https://docs.ollama.com/api/chat) 的 JSON schema 输出；失败或输出不合规时降级规则，成功标记 `ai`。`has_vocal=null` 表示没有足够证据。
+默认使用本地规则，`classify_stage=rules`。服务端可在 Git 忽略的 `.env` 中配置 `ARK_API_KEY` 启用[火山方舟 Chat Completions](https://docs.volcengine.com/docs/ark/chat-api?lang=zh&redirect=1) 分类；`GETAUDIO_ARK_MODELS` 是按先后顺序尝试的模型 ID 列表，默认先 `doubao-seed-2-0-mini-260428`，失败再试 `doubao-seed-2-1-pro-260915`。这两个模型已经用当前账号实际调用验证；[模型目录](https://docs.volcengine.com/docs/ark/model-list?lang=zh)中出现不等于账号已开通。还可设置 `GETAUDIO_OLLAMA_MODEL` 使用本地 Ollama 后备；所有 AI 路径失败时回退规则。只有有效且符合分类 schema 的回答会标记 `ai`，`has_vocal=null` 表示没有足够证据。API Key 不放进 APK，因此手机直提取只做本地保存，不调用方舟分类。
 
 ```bash
 # 为旧音频补分类（默认最多 100 条）；重算已完成 AI 分类可加 --force
