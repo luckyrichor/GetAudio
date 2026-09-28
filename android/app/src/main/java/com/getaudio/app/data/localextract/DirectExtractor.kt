@@ -138,11 +138,25 @@ class DirectExtractor(
             val browserCookies = cookies.loadForRequest("https://www.douyin.com/".toHttpUrlOrNull()!!)
             val credentialHint = if (browserCookies.none { it.name == "ttwid" }) "；未取得抖音访客凭证" else ""
             report("浏览器重试：开始，ttwid ${if (browserCookies.any { it.name == "ttwid" }) "有" else "无"}")
-            runCatching { DouyinBrowserDetail.fetch(context, link.videoId, url, ua, browserCookies, report) }
-                .getOrElse { browserError ->
-                    report("浏览器重试：${failureKind(browserError)}")
-                    error("抖音作品详情请求失败（${e.message}$credentialHint），浏览器重试也失败：${browserError.message}")
+            val browser = runCatching {
+                DouyinBrowserDetail.fetch(context, link.videoId, url, ua, browserCookies, report)
+            }
+            if (browser.isSuccess) browser.getOrThrow() else {
+                report("浏览器重试：${failureKind(browser.exceptionOrNull()!!)}")
+                report("公开分享页：尝试读取播放器地址")
+                val fallback = runCatching {
+                    DouyinBrowserDetail.fetchPublicVideo(context, link.videoId, report)
+                }.getOrElse { pageError ->
+                    report("公开分享页：${failureKind(pageError)}")
+                    error("抖音作品详情请求失败（${e.message}$credentialHint），浏览器重试也失败；公开分享页未取得媒体地址：${pageError.message}")
                 }
+                val mediaHost = fallback.first.toHttpUrlOrNull()?.host ?: "未知"
+                report("公开分享页：找到播放器地址，域名 $mediaHost")
+                return Media(
+                    fallback.second.ifBlank { "抖音 ${link.videoId}" }, null,
+                    listOf(fallback.first), "https://www.iesdouyin.com/",
+                )
+            }
         }
         report("作品详情内容：status_code=${response.optInt("status_code", -1)}，作品数据${if (response.optJSONObject("aweme_detail") == null) "缺失" else "存在"}")
         val detail = response.optJSONObject("aweme_detail")
