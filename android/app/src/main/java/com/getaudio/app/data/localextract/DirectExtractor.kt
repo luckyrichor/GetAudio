@@ -81,15 +81,17 @@ class DirectExtractor(private val context: Context) {
         val raw = DirectLinkParser.find(text)
         val rawHost = raw.toHttpUrlOrNull()?.host ?: error("分享链接无效")
         val isShort = rawHost in setOf("b23.tv", "bili2233.cn", "v.douyin.com", "v.iesdouyin.com")
-        val url = if (isShort) client.newCall(Request.Builder().url(raw).get().build()).execute().use {
+        val url = if (isShort) client.newCall(Request.Builder().url(raw)
+            .header("User-Agent", BROWSER_UA).get().build()).execute().use {
             it.request.url.toString()
         } else raw
         return DirectLinkParser.parse(url)
     }
 
-    private fun douyin(link: DirectLink): Media {
+    private suspend fun douyin(link: DirectLink): Media {
         val ua = BROWSER_UA
-        get("https://www.douyin.com/", ua = ua)
+        // The home page can be blocked even when the detail API is available.
+        runCatching { get("https://www.douyin.com/", ua = ua, stage = "抖音首页") }
         val token = ByteArray(81).also(SecureRandom()::nextBytes)
         val msToken = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(token)
         cookies.put("douyin.com", "msToken", msToken)
@@ -105,8 +107,19 @@ class DirectExtractor(private val context: Context) {
         val url = "https://www.douyin.com/aweme/v1/web/aweme/detail/?device_platform=webapp&aid=6383" +
             "&channel=channel_pc_web&pc_client_type=1&version_code=170400&version_name=17.4.0" +
             "&cookie_enabled=true&platform=PC&downlink=10&aweme_id=${link.videoId}"
-        val response = get(url, ua = ua, referer = link.url)
-        val detail = JSONObject(response).optJSONObject("aweme_detail")
+        val response = try {
+            JSONObject(get(url, ua = ua, referer = link.url, stage = "抖音作品详情"))
+        } catch (e: Exception) {
+            if (e is PlatformHttpException && e.code != 403) throw e
+            if (e !is PlatformHttpException && e !is org.json.JSONException) throw e
+            val browserCookies = cookies.loadForRequest("https://www.douyin.com/".toHttpUrlOrNull()!!)
+            val credentialHint = if (browserCookies.none { it.name == "ttwid" }) "；未取得抖音访客凭证" else ""
+            runCatching { DouyinBrowserDetail.fetch(context, link.videoId, url, ua, browserCookies) }
+                .getOrElse { browserError ->
+                    error("抖音作品详情请求失败（${e.message}$credentialHint），浏览器重试也失败：${browserError.message}")
+                }
+        }
+        val detail = response.optJSONObject("aweme_detail")
             ?: error("抖音没有返回作品信息；可能需要登录，或该作品不可见")
         val video = detail.optJSONObject("video")
         val music = detail.optJSONObject("music")
@@ -165,14 +178,19 @@ class DirectExtractor(private val context: Context) {
             "https://www.bilibili.com/")
     }
 
-    private fun get(url: String, ua: String = BROWSER_UA, referer: String? = null): String {
+    private fun get(url: String, ua: String = BROWSER_UA, referer: String? = null, stage: String = "平台"): String {
         val builder = Request.Builder().url(url).header("User-Agent", ua)
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
         if (referer != null) builder.header("Referer", referer)
         client.newCall(builder.build()).execute().use { response ->
-            require(response.isSuccessful) { "平台请求失败：HTTP ${response.code}" }
+            if (!response.isSuccessful) throw PlatformHttpException(stage, response.code)
             return response.body?.string() ?: error("平台返回空内容")
         }
     }
+
+    private class PlatformHttpException(stage: String, val code: Int) :
+        IllegalStateException("$stage 请求失败：HTTP $code")
 
     private fun download(urls: List<String>, dest: File, referer: String) {
         var last: Exception? = null

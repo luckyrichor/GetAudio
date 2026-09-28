@@ -131,7 +131,7 @@ cd android && ./gradlew testDebugUnitTest assembleDebug
 
 ## 已知限制
 
-- 抖音 Web 接口反爬改得很勤，`douyin.py` 是全项目最脆的一块。坏掉时先看 detail 接口返回的 `filter_reason`
+- 抖音 Web 接口反爬改得很勤，`douyin.py` 是全项目最脆的一块。手机端遇到作品详情 HTTP 403 会用 Android 浏览器内核重试；若网络或平台继续拒绝，需根据 App 显示的具体步骤排查
 - 抖音扫码登录走不通，只能导入 cookie
 - SQLite 写事务通过 `BEGIN IMMEDIATE` 串行分配同步游标；当前仅验证 SQLite，切换其他数据库需重新设计与验证提交顺序
 - 相同平台/视频自动去重；Chromaprint 可提示跨平台相似候选，但片段剪辑、静音、较大起始偏移不保证识别，不自动删除来源
