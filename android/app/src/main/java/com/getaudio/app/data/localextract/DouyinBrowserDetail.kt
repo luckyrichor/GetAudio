@@ -18,61 +18,6 @@ import kotlin.coroutines.resume
 
 /** Retry Douyin's public detail request in the phone's browser engine when HTTP is blocked. */
 internal object DouyinBrowserDetail {
-    /** Read a public share page's player URL, without calling the blocked detail API. */
-    suspend fun fetchPublicVideo(
-        context: Context, videoId: String, report: suspend (String) -> Unit,
-    ): Pair<String, String> = withContext(Dispatchers.Main) {
-        val webView = WebView(context)
-        try {
-            webView.settings.javaScriptEnabled = true
-            webView.settings.domStorageEnabled = true
-            webView.settings.mediaPlaybackRequiresUserGesture = false
-            webView.settings.allowFileAccess = false
-            webView.settings.allowContentAccess = false
-            var loaded = false
-            var pageError: Int? = null
-            webView.webViewClient = object : WebViewClient() {
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    if (url?.startsWith("https://www.iesdouyin.com/") == true ||
-                        url?.startsWith("https://m.douyin.com/") == true) loaded = true
-                }
-                override fun onReceivedHttpError(
-                    view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?,
-                ) {
-                    if (request?.isForMainFrame == true) pageError = errorResponse?.statusCode
-                }
-            }
-            webView.loadUrl("https://www.iesdouyin.com/share/video/$videoId/")
-            withTimeout(25_000) {
-                while (!loaded) delay(250)
-                report("公开分享页：已加载${pageError?.let { "，主页面 HTTP $it" } ?: ""}")
-                var found: Pair<String, String>? = null
-                repeat(40) {
-                    if (found == null) {
-                        delay(500)
-                        val raw = webView.eval("""
-                            JSON.stringify({
-                              url: document.querySelector('video')?.currentSrc ||
-                                document.querySelector('video')?.src ||
-                                document.querySelector('video source')?.src || '',
-                              title: document.querySelector('meta[property="og:title"]')?.content || document.title || ''
-                            })
-                        """.trimIndent())
-                        val data = JSONObject(JSONArray("[$raw]").getString(0))
-                        val url = data.optString("url")
-                        if (url.startsWith("https://") || url.startsWith("http://")) {
-                            found = url to data.optString("title")
-                        }
-                    }
-                }
-                found ?: error("分享页已加载，但未出现可下载的播放器地址")
-            }
-        } finally {
-            webView.stopLoading()
-            webView.destroy()
-        }
-    }
-
     suspend fun fetch(
         context: Context, videoId: String, apiUrl: String, userAgent: String,
         cookies: List<Cookie>, report: suspend (String) -> Unit,

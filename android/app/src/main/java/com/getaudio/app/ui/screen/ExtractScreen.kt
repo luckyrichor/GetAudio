@@ -35,6 +35,10 @@ class ExtractViewModel(private val repo: TrackRepository, private val version: S
         private set
     var diagnostics by mutableStateOf<List<String>>(emptyList())
         private set
+    var directFailed by mutableStateOf(false)
+        private set
+    var usingServer by mutableStateOf(false)
+        private set
     private var startedAt = 0L
 
     private fun record(message: String) {
@@ -47,6 +51,8 @@ class ExtractViewModel(private val repo: TrackRepository, private val version: S
         if (text.isEmpty() || busy) return
         viewModelScope.launch {
             busy = true
+            usingServer = false
+            directFailed = false
             error = null
             result = null
             startedAt = SystemClock.elapsedRealtime()
@@ -55,9 +61,33 @@ class ExtractViewModel(private val repo: TrackRepository, private val version: S
                 .onSuccess { result = it; input = "" }
                 .onFailure {
                     error = ApiProvider.humanMessage(it)
+                    directFailed = true
                     record("提取失败：${it.javaClass.simpleName}")
                 }
             busy = false
+        }
+    }
+
+    fun submitViaServer() {
+        val text = input.trim()
+        if (text.isEmpty() || busy || !directFailed) return
+        viewModelScope.launch {
+            busy = true
+            usingServer = true
+            error = null
+            record("手动选择服务器提取")
+            repo.extractViaServer(text, ::record)
+                .onSuccess {
+                    result = it
+                    input = ""
+                    directFailed = false
+                }
+                .onFailure {
+                    error = ApiProvider.humanMessage(it)
+                    record("服务器提取失败：${it.javaClass.simpleName}")
+                }
+            busy = false
+            usingServer = false
         }
     }
 
@@ -131,7 +161,8 @@ fun ExtractScreen(prefill: String? = null, onSharedConsumed: () -> Unit = {}) {
         if (vm.busy) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
             Text(
-                "手机正在下载并抽取音轨，长视频可能要等一会儿。",
+                if (vm.usingServer) "服务器正在提取，完成后会下载到手机；长视频可能要等一会儿。"
+                else "手机正在下载并抽取音轨，长视频可能要等一会儿。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -141,6 +172,17 @@ fun ExtractScreen(prefill: String? = null, onSharedConsumed: () -> Unit = {}) {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                 Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onErrorContainer)
             }
+        }
+
+        if (vm.directFailed) {
+            OutlinedButton(onClick = vm::submitViaServer, enabled = !vm.busy && vm.input.isNotBlank()) {
+                Text("通过服务器提取")
+            }
+            Text(
+                "仅点击此按钮才会将分享文本发给设置中的服务器；需要先填写并保存服务器地址。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         vm.result?.let { t ->

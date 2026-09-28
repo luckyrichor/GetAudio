@@ -58,8 +58,8 @@ fun SettingsScreen() {
         OutlinedTextField(
             value = vm.serverUrl,
             onValueChange = { vm.serverUrl = it; vm.ack() },
-            label = { Text("可选同步服务器地址") },
-            supportingText = { Text("直接提取不需要服务器；10.0.2.2 仅供模拟器访问宿主机，真机不可用") },
+            label = { Text("可选服务器地址") },
+            supportingText = { Text("手机直提取不需要服务器；失败后可手动选择服务器提取。10.0.2.2 仅供模拟器使用，真机不可用") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )

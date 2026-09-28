@@ -13,8 +13,8 @@ android {
         applicationId = "com.getaudio.app"
         minSdk = 26          // Media3 和后台播放在 8.0 以下坑太多
         targetSdk = 34
-        versionCode = 6
-        versionName = "0.2.4"
+        versionCode = 7
+        versionName = "0.2.5"
 
     }
 
@@ -87,5 +87,6 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.0")
 }

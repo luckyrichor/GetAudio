@@ -8,6 +8,7 @@ import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import com.getaudio.app.data.local.TrackEntity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.Cookie
 import okhttp3.CookieJar
@@ -101,6 +102,12 @@ class DirectExtractor(
     }
 
     private suspend fun douyin(link: DirectLink): Media {
+        val shareItem = fetchSharePageItem(link)
+        if (shareItem != null) {
+            report("公开分享页：取得目标作品数据")
+            return douyinMedia(shareItem, link, "https://www.iesdouyin.com/")
+        }
+        report("公开分享页：未取得作品数据，尝试作品详情接口")
         val ua = BROWSER_UA
         // The home page can be blocked even when the detail API is available.
         try {
@@ -143,24 +150,40 @@ class DirectExtractor(
             }
             if (browser.isSuccess) browser.getOrThrow() else {
                 report("浏览器重试：${failureKind(browser.exceptionOrNull()!!)}")
-                report("公开分享页：尝试读取播放器地址")
-                val fallback = runCatching {
-                    DouyinBrowserDetail.fetchPublicVideo(context, link.videoId, report)
-                }.getOrElse { pageError ->
-                    report("公开分享页：${failureKind(pageError)}")
-                    error("抖音作品详情请求失败（${e.message}$credentialHint），浏览器重试也失败；公开分享页未取得媒体地址：${pageError.message}")
-                }
-                val mediaHost = fallback.first.toHttpUrlOrNull()?.host ?: "未知"
-                report("公开分享页：找到播放器地址，域名 $mediaHost")
-                return Media(
-                    fallback.second.ifBlank { "抖音 ${link.videoId}" }, null,
-                    listOf(fallback.first), "https://www.iesdouyin.com/",
-                )
+                error("抖音作品详情请求失败（${e.message}$credentialHint），浏览器重试也失败：${browser.exceptionOrNull()?.message}")
             }
         }
         report("作品详情内容：status_code=${response.optInt("status_code", -1)}，作品数据${if (response.optJSONObject("aweme_detail") == null) "缺失" else "存在"}")
         val detail = response.optJSONObject("aweme_detail")
             ?: error("抖音没有返回作品信息；可能需要登录，或该作品不可见")
+        return douyinMedia(detail, link, "https://www.douyin.com/")
+    }
+
+    private suspend fun fetchSharePageItem(link: DirectLink): JSONObject? {
+        val url = "https://www.iesdouyin.com/share/video/${link.videoId}/"
+        repeat(5) { attempt ->
+            try {
+                val request = Request.Builder().url(url)
+                    .header("User-Agent", MOBILE_UA)
+                    .header("Accept", "text/html,application/xhtml+xml")
+                    .header("Accept-Language", "zh-CN,zh;q=0.9")
+                    .build()
+                val item = client.newCall(request).execute().use { response ->
+                    val html = response.body?.string().orEmpty()
+                    val found = if (response.isSuccessful) DouyinSharePageParser.findItem(html, link.videoId) else null
+                    report("公开分享页 ${attempt + 1}/5：HTTP ${response.code}，访客 Cookie ${if (cookies.has("ttwid")) "有" else "无"}，作品数据${if (found == null) "无" else "有"}")
+                    found
+                }
+                if (item != null) return item
+            } catch (e: Exception) {
+                report("公开分享页 ${attempt + 1}/5：${failureKind(e)}")
+            }
+            if (attempt < 4) delay(300)
+        }
+        return null
+    }
+
+    private suspend fun douyinMedia(detail: JSONObject, link: DirectLink, referer: String): Media {
         val video = detail.optJSONObject("video")
         val music = detail.optJSONObject("music")
         val videoSeconds = detail.optDouble("duration", 0.0) / 1000.0
@@ -179,7 +202,7 @@ class DirectExtractor(
         val title = music?.optString("title")?.takeIf(String::isNotBlank)
             ?: detail.optString("desc").take(60).ifBlank { "抖音 ${link.videoId}" }
         return Media(title, detail.optJSONObject("author")?.optString("nickname"),
-            selected.distinct(), "https://www.douyin.com/")
+            selected.distinct(), referer)
     }
 
     private suspend fun bilibili(link: DirectLink): Media {
@@ -359,6 +382,7 @@ class DirectExtractor(
 
     companion object {
         private const val BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        private const val MOBILE_UA = "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
         private val MIXIN_TABLE = intArrayOf(
             46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
             27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13,

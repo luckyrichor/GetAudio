@@ -5,6 +5,7 @@ import com.getaudio.app.data.local.AppDatabase
 import com.getaudio.app.data.local.SyncStateEntity
 import com.getaudio.app.data.local.TrackEntity
 import com.getaudio.app.data.remote.TrackDto
+import com.getaudio.app.data.remote.ExtractRequest
 import com.getaudio.app.data.localextract.DirectExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -50,6 +51,24 @@ class TrackRepository(private val context: Context) {
             withContext(Dispatchers.Main) { onDiagnostic("已加入本地音频库") }
             entity
         }
+    }
+
+    /** Explicit fallback: ask the configured GetAudio server to extract, then cache its audio on this phone. */
+    suspend fun extractViaServer(
+        text: String, onDiagnostic: (String) -> Unit = {},
+    ): Result<TrackEntity> = runCatching {
+        val base = settings.serverUrlNow()
+        require(base.isNotBlank()) { "请先到设置填写并保存服务器地址" }
+        onDiagnostic("服务器提取：已提交，等待处理")
+        val response = ApiProvider.api(base).extract(
+            ExtractRequest(text = text, userId = settings.userId()),
+        )
+        val entity = response.track.toEntity()
+        onDiagnostic("服务器提取：成功，开始下载音频到手机")
+        fileMutex.withLock { trackDao.applySync(listOf(entity), emptyList()) }
+        download(entity).getOrThrow()
+        onDiagnostic("服务器音频：下载完成，已加入本地音频库")
+        trackDao.byId(entity.id) ?: entity
     }
 
     // ---------- 同步 ----------
