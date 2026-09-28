@@ -69,13 +69,17 @@ class ExtractViewModel(private val repo: TrackRepository) : ViewModel() {
 }
 
 @Composable
-fun ExtractScreen(prefill: String? = null) {
+fun ExtractScreen(prefill: String? = null, onSharedConsumed: () -> Unit = {}) {
     val context = LocalContext.current
     val vm: ExtractViewModel = viewModel(factory = ExtractViewModel.Factory(context))
 
     // 从别的 App 分享进来的内容优先；否则试试剪贴板
     LaunchedEffect(prefill) {
-        if (!prefill.isNullOrBlank()) vm.input = prefill else vm.pasteFromClipboard(context)
+        if (!prefill.isNullOrBlank()) {
+            vm.input = prefill
+            onSharedConsumed()
+            vm.submit()
+        } else if (vm.input.isBlank()) vm.pasteFromClipboard(context)
     }
 
     Column(
@@ -109,7 +113,7 @@ fun ExtractScreen(prefill: String? = null) {
         if (vm.busy) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
             Text(
-                "服务器正在下载和转码，长视频可能要等一会儿。",
+                "手机正在下载并抽取音轨，长视频可能要等一会儿。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

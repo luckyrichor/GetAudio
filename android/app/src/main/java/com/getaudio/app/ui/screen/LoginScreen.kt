@@ -117,9 +117,9 @@ fun LoginScreen() {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("平台登录", style = MaterialTheme.typography.titleMedium)
+        Text("可选服务器登录", style = MaterialTheme.typography.titleMedium)
         Text(
-            "登录后才能提取会员内容和更高音质。凭证加密保存在服务器，按用户隔离。",
+            "这里的凭证只供可选同步服务器使用。手机直接提取目前支持公开作品，不读取其他 App 的登录状态。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

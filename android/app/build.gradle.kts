@@ -13,11 +13,9 @@ android {
         applicationId = "com.getaudio.app"
         minSdk = 26          // Media3 和后台播放在 8.0 以下坑太多
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
 
-        // 服务器地址编进 BuildConfig，调试时改这里就行
-        buildConfigField("String", "DEFAULT_SERVER", "\"http://10.0.2.2:8800\"")
     }
 
     buildTypes {
@@ -39,7 +37,6 @@ android {
     }
     buildFeatures {
         compose = true
-        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.11"

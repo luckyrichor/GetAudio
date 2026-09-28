@@ -62,8 +62,8 @@ object ApiProvider {
                 else -> body ?: "服务器错误（${t.code()}）"
             }
         }
-        is java.net.SocketTimeoutException -> "请求超时 —— 服务器可能还在下载，稍后看看库里有没有"
-        is java.net.ConnectException -> "连不上服务器，检查地址和网络"
+        is java.net.SocketTimeoutException -> "请求超时，请检查网络或稍后重试"
+        is java.net.ConnectException -> "连接失败，请检查网络"
         else -> t.message ?: "未知错误"
     }
 }

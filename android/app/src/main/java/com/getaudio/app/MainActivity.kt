@@ -20,11 +20,12 @@ import com.getaudio.app.ui.screen.LibraryScreen
 import com.getaudio.app.ui.screen.LoginScreen
 import com.getaudio.app.ui.screen.SettingsScreen
 import com.getaudio.app.ui.theme.GetAudioTheme
+import com.getaudio.app.data.repo.Settings
 
 private enum class Tab(val label: String, val icon: ImageVector) {
     LIBRARY("音频库", Icons.Default.LibraryMusic),
     EXTRACT("提取", Icons.Default.Link),
-    LOGIN("登录", Icons.Default.Person),
+    LOGIN("云端登录", Icons.Default.Person),
     SETTINGS("设置", Icons.Default.Settings),
 }
 
@@ -34,9 +35,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             GetAudioTheme {
+                val serverUrl by remember { Settings(applicationContext).serverUrl }.collectAsState(initial = "")
                 // 从 B站/抖音「分享到 GetAudio」进来时直接落在提取页
                 var shared by remember { mutableStateOf(sharedText(intent)) }
                 var tab by remember { mutableStateOf(if (shared != null) Tab.EXTRACT else Tab.LIBRARY) }
+
+                LaunchedEffect(serverUrl) {
+                    if (serverUrl.isBlank() && tab == Tab.LOGIN) tab = Tab.LIBRARY
+                }
 
                 DisposableEffect(Unit) {
                     val listener = { newIntent: Intent ->
@@ -50,7 +56,7 @@ class MainActivity : ComponentActivity() {
                 Scaffold(
                     bottomBar = {
                         NavigationBar {
-                            Tab.entries.forEach { t ->
+                            Tab.entries.filter { it != Tab.LOGIN || serverUrl.isNotBlank() }.forEach { t ->
                                 NavigationBarItem(
                                     selected = tab == t,
                                     onClick = { tab = t },
@@ -64,7 +70,7 @@ class MainActivity : ComponentActivity() {
                     Surface(Modifier.fillMaxSize().padding(padding)) {
                         when (tab) {
                             Tab.LIBRARY -> LibraryScreen()
-                            Tab.EXTRACT -> ExtractScreen(prefill = shared)
+                            Tab.EXTRACT -> ExtractScreen(prefill = shared, onSharedConsumed = { shared = null })
                             Tab.LOGIN -> LoginScreen()
                             Tab.SETTINGS -> SettingsScreen()
                         }

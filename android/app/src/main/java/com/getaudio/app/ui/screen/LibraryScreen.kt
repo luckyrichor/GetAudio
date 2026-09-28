@@ -1,6 +1,9 @@
 package com.getaudio.app.ui.screen
 
 import android.content.Context
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -10,6 +13,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,6 +28,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.getaudio.app.data.local.TrackEntity
 import com.getaudio.app.data.repo.ApiProvider
 import com.getaudio.app.data.repo.TrackRepository
+import com.getaudio.app.data.repo.Settings
 import com.getaudio.app.player.PlayerHolder
 import com.getaudio.app.ui.formatDuration
 import com.getaudio.app.ui.formatSize
@@ -31,7 +36,7 @@ import com.getaudio.app.ui.platformLabel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-class LibraryViewModel(private val repo: TrackRepository) : ViewModel() {
+class LibraryViewModel(private val repo: TrackRepository, context: Context) : ViewModel() {
 
     private val query = MutableStateFlow("")
     private val platform = MutableStateFlow<String?>(null)
@@ -41,6 +46,10 @@ class LibraryViewModel(private val repo: TrackRepository) : ViewModel() {
         private set
     var syncing by mutableStateOf(false)
         private set
+
+    val serverConfigured: StateFlow<Boolean> = Settings(context).serverUrl
+        .map { it.isNotBlank() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val tracks: StateFlow<List<TrackEntity>> =
@@ -86,12 +95,24 @@ class LibraryViewModel(private val repo: TrackRepository) : ViewModel() {
             .onFailure { message = ApiProvider.humanMessage(it) }
     }
 
+    fun export(context: Context, t: TrackEntity, uri: Uri) = viewModelScope.launch {
+        message = "正在导出…"
+        repo.download(t).onSuccess { file ->
+            runCatching {
+                val output = context.contentResolver.openOutputStream(uri)
+                    ?: error("无法打开目标文件")
+                output.use { out -> file.inputStream().use { it.copyTo(out) } }
+            }.onSuccess { message = "音频已导出" }
+                .onFailure { message = ApiProvider.humanMessage(it) }
+        }.onFailure { message = ApiProvider.humanMessage(it) }
+    }
+
     fun clearMessage() { message = null }
 
     class Factory(private val context: Context) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            LibraryViewModel(TrackRepository(context)) as T
+            LibraryViewModel(TrackRepository(context), context) as T
     }
 }
 
@@ -104,7 +125,13 @@ fun LibraryScreen() {
     val query by vm.currentQuery.collectAsState()
     val platform by vm.currentPlatform.collectAsState()
     val favOnly by vm.favoritesOnly.collectAsState()
+    val serverConfigured by vm.serverConfigured.collectAsState()
     val snackbar = remember { SnackbarHostState() }
+    var exportTrack by remember { mutableStateOf<TrackEntity?>(null) }
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/*")) { uri ->
+        if (uri != null) exportTrack?.let { vm.export(context, it, uri) }
+        exportTrack = null
+    }
 
     LaunchedEffect(vm.message) {
         vm.message?.let {
@@ -134,8 +161,10 @@ fun LibraryScreen() {
                 FilterChip(platform == "douyin", { vm.setPlatform("douyin") }, { Text("抖音") })
                 FilterChip(favOnly, { vm.toggleFavoritesFilter() }, { Text("收藏") })
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = vm::sync, enabled = !vm.syncing) {
-                    Text(if (vm.syncing) "同步中…" else "同步")
+                if (serverConfigured) {
+                    TextButton(onClick = vm::sync, enabled = !vm.syncing) {
+                        Text(if (vm.syncing) "同步中…" else "云同步")
+                    }
                 }
             }
 
@@ -148,6 +177,12 @@ fun LibraryScreen() {
                             track = track,
                             onPlay = { vm.playOrDownload(context, track) },
                             onFavorite = { vm.toggleFavorite(track) },
+                            onExport = {
+                                exportTrack = track
+                                val name = track.title.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").take(80)
+                                val extension = track.audioFormat.takeIf { it in setOf("m4a", "mp3", "flac", "ogg", "opus") } ?: "audio"
+                                exportLauncher.launch("${name.ifBlank { "GetAudio" }}.$extension")
+                            },
                         )
                         HorizontalDivider()
                     }
@@ -169,7 +204,7 @@ private fun EmptyHint(filtered: Boolean) {
 }
 
 @Composable
-private fun TrackRow(track: TrackEntity, onPlay: () -> Unit, onFavorite: () -> Unit) {
+private fun TrackRow(track: TrackEntity, onPlay: () -> Unit, onFavorite: () -> Unit, onExport: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onPlay).padding(16.dp, 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -208,6 +243,9 @@ private fun TrackRow(track: TrackEntity, onPlay: () -> Unit, onFavorite: () -> U
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        IconButton(onClick = onExport) {
+            Icon(Icons.Default.SaveAlt, contentDescription = "导出音频")
         }
         IconButton(onClick = onFavorite) {
             Icon(

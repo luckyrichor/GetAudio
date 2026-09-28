@@ -63,6 +63,12 @@ interface TrackDao {
         }
         upsertAll(merged)
     }
+
+    @Transaction
+    suspend fun upsertLocal(track: TrackEntity) {
+        val existing = byId(track.id)
+        upsertAll(listOf(track.copy(favorite = existing?.favorite ?: false)))
+    }
 }
 
 @Dao

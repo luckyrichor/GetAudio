@@ -58,8 +58,8 @@ fun SettingsScreen() {
         OutlinedTextField(
             value = vm.serverUrl,
             onValueChange = { vm.serverUrl = it; vm.ack() },
-            label = { Text("服务器地址") },
-            supportingText = { Text("例如 http://192.168.1.10:8800") },
+            label = { Text("可选同步服务器地址") },
+            supportingText = { Text("直接提取不需要服务器；需要同步旧库时才填写") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -74,7 +74,7 @@ fun SettingsScreen() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            "服务器用它区分各人的平台凭证。换设备想沿用同一份凭证的话，把这串填到新设备上。",
+            "仅同步服务器功能使用；手机直接提取不需要此 ID。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -4,8 +4,8 @@ import android.content.Context
 import com.getaudio.app.data.local.AppDatabase
 import com.getaudio.app.data.local.SyncStateEntity
 import com.getaudio.app.data.local.TrackEntity
-import com.getaudio.app.data.remote.ExtractRequest
 import com.getaudio.app.data.remote.TrackDto
+import com.getaudio.app.data.localextract.DirectExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -40,15 +40,12 @@ class TrackRepository(private val context: Context) {
 
     // ---------- 提取 ----------
 
-    /** 把分享文本交给服务器提取。成功后立刻同步一次，让新条目出现在库里。 */
+    /** 分享文本由手机直接提取，保存到本地库，不依赖 GetAudio 服务器。 */
     suspend fun extract(text: String): Result<TrackEntity> = runCatching {
         withContext(Dispatchers.IO) {
-            val api = ApiProvider.api(settings.serverUrlNow())
-            val resp = api.extract(ExtractRequest(text = text, userId = settings.userId()))
-            val entity = resp.track.toEntity()
-            fileMutex.withLock { trackDao.applySync(listOf(entity), emptyList()) }
-            sync()
-            trackDao.byId(entity.id) ?: entity
+            val entity = DirectExtractor(context).extract(text)
+            fileMutex.withLock { trackDao.upsertLocal(entity) }
+            entity
         }
     }
 
@@ -56,7 +53,9 @@ class TrackRepository(private val context: Context) {
 
     /** 增量拉取，返回本次新增/更新的条数。 */
     suspend fun sync(): Int = withContext(Dispatchers.IO) { fileMutex.withLock {
-        val api = ApiProvider.api(settings.serverUrlNow())
+        val serverUrl = settings.serverUrlNow()
+        if (serverUrl.isBlank()) return@withLock 0
+        val api = ApiProvider.api(serverUrl)
         var cursor = syncDao.cursor()
         var total = 0
 
@@ -129,6 +128,7 @@ class TrackRepository(private val context: Context) {
 
     /** 批量补齐未下载的音频，返回成功条数。给 WorkManager 用。 */
     suspend fun downloadPending(limit: Int = 20): Int {
+        if (settings.serverUrlNow().isBlank()) return 0
         var ok = 0
         trackDao.notDownloaded(limit).forEach { track ->
             if (download(track).isSuccess) ok++
