@@ -11,6 +11,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
 import org.json.JSONArray
 import org.json.JSONObject
 import okhttp3.Cookie
@@ -43,29 +44,54 @@ internal object DouyinBrowserDetail {
                 }
             }
             webView.loadUrl("https://www.iesdouyin.com/share/video/$videoId/")
-            withTimeout(25_000) {
-                while (!loaded) delay(250)
-                report("公开分享页：已加载${pageError?.let { "，主页面 HTTP $it" } ?: ""}")
-                var found: Pair<String, String>? = null
-                repeat(40) {
-                    if (found == null) {
-                        delay(500)
-                        val raw = webView.eval("""
-                            JSON.stringify({
-                              url: document.querySelector('video')?.currentSrc ||
-                                document.querySelector('video')?.src ||
-                                document.querySelector('video source')?.src || '',
-                              title: document.querySelector('meta[property="og:title"]')?.content || document.title || ''
-                            })
-                        """.trimIndent())
-                        val data = JSONObject(JSONArray("[$raw]").getString(0))
-                        val url = data.optString("url")
-                        if (url.startsWith("https://") || url.startsWith("http://")) {
-                            found = url to data.optString("title")
+            var lastDiag: JSONObject? = null
+            val found = try {
+                withTimeout(25_000) {
+                    while (!loaded) delay(250)
+                    report("公开分享页：已加载${pageError?.let { "，主页面 HTTP $it" } ?: ""}")
+                    var media: Pair<String, String>? = null
+                    repeat(40) {
+                        if (media == null) {
+                            delay(500)
+                            val raw = webView.eval("""
+                                (function(){
+                                  try {
+                                    var d = window._ROUTER_DATA, item = null;
+                                    if (d && d.loaderData) {
+                                      for (var k in d.loaderData) {
+                                        var info = d.loaderData[k] && d.loaderData[k].videoInfoRes;
+                                        if (info && info.item_list && info.item_list.length) { item = info.item_list[0]; break; }
+                                      }
+                                    }
+                                    var v = document.querySelector('video');
+                                    var play = (item && item.video && item.video.play_addr &&
+                                                item.video.play_addr.url_list && item.video.play_addr.url_list[0]) || '';
+                                    return JSON.stringify({
+                                      url: play.replace('playwm','play') || (v && (v.currentSrc || v.src)) || '',
+                                      title: (item && item.desc) || document.title || '',
+                                      diag: {ready: document.readyState, hasRouter: !!d, hasItem: !!item,
+                                             hasVideo: !!v, bodyLen: document.body ? document.body.innerText.length : 0}
+                                    });
+                                  } catch (e) { return JSON.stringify({url:'', title:'', diag:{err:String(e)}}); }
+                                })()
+                            """.trimIndent())
+                            val data = JSONObject(JSONArray("[$raw]").getString(0))
+                            lastDiag = data.optJSONObject("diag")
+                            val url = data.optString("url")
+                            if (url.startsWith("https://") || url.startsWith("http://")) {
+                                media = url to data.optString("title")
+                            }
                         }
                     }
+                    media
                 }
-                found ?: error("分享页已加载，但未出现可下载的播放器地址")
+            } catch (e: TimeoutCancellationException) {
+                report("公开分享页状态：${publicPageStatus(lastDiag, loaded, pageError)}")
+                throw e
+            }
+            found ?: run {
+                report("公开分享页状态：${publicPageStatus(lastDiag, loaded, pageError)}")
+                error("分享页已加载，但未出现可下载的播放器地址")
             }
         } finally {
             webView.stopLoading()
@@ -146,5 +172,14 @@ internal object DouyinBrowserDetail {
         evaluateJavascript(script) { result ->
             if (continuation.isActive) continuation.resume(result)
         }
+    }
+
+    private fun publicPageStatus(diag: JSONObject?, loaded: Boolean, pageError: Int?): String {
+        val ready = diag?.optString("ready").orEmpty()
+        return "loaded=$loaded，mainHttp=${pageError ?: 0}，hasDiag=${diag != null}，" +
+            "readyLoading=${ready == "loading"}，readyInteractive=${ready == "interactive"}，" +
+            "readyComplete=${ready == "complete"}，hasRouter=${diag?.optBoolean("hasRouter") ?: false}，" +
+            "hasItem=${diag?.optBoolean("hasItem") ?: false}，hasVideo=${diag?.optBoolean("hasVideo") ?: false}，" +
+            "bodyLen=${diag?.optInt("bodyLen") ?: 0}，scriptError=${diag?.has("err") ?: false}"
     }
 }

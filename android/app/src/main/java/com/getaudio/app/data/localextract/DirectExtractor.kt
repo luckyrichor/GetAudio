@@ -330,6 +330,7 @@ class DirectExtractor(
     private fun urls(obj: JSONObject?): List<String> = strings(obj?.optJSONArray("url_list"))
     private fun failureKind(error: Throwable): String = when (error) {
         is PlatformHttpException -> "HTTP ${error.code}"
+        is IllegalStateException -> error.message.orEmpty().take(80).ifBlank { "IllegalStateException" }
         else -> Regex("HTTP (\\d{3})").find(error.message.orEmpty())?.value
             ?: error.javaClass.simpleName
     }
