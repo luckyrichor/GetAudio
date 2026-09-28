@@ -20,6 +20,7 @@ import com.getaudio.app.data.repo.ApiProvider
 import com.getaudio.app.data.repo.LoginRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 
 class LoginViewModel(private val repo: LoginRepository) : ViewModel() {
 
@@ -49,6 +50,7 @@ class LoginViewModel(private val repo: LoginRepository) : ViewModel() {
         message = null
         qrImageUrl = null
         state = null
+        showImport = false
 
         repo.start(platform)
             .onSuccess { resp ->
@@ -56,11 +58,13 @@ class LoginViewModel(private val repo: LoginRepository) : ViewModel() {
                 message = "用 ${platformName(platform)} App 扫码"
                 pollUntilDone(resp.sessionId, resp.expiresIn)
             }
-            .onFailure {
-                message = ApiProvider.humanMessage(it)
-                // 501 = 该平台扫码走不通，直接把导入表单摊开
-                showImport = true
-                importPlatform = platform
+            .onFailure { error ->
+                message = ApiProvider.humanMessage(error)
+                // 只有服务器明确返回 501 才提示导入 Cookie；连接失败不是平台登录限制。
+                if (error is HttpException && error.code() == 501) {
+                    showImport = true
+                    importPlatform = platform
+                }
             }
         busy = false
     }

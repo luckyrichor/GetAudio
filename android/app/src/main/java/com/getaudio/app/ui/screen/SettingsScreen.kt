@@ -59,7 +59,7 @@ fun SettingsScreen() {
             value = vm.serverUrl,
             onValueChange = { vm.serverUrl = it; vm.ack() },
             label = { Text("可选同步服务器地址") },
-            supportingText = { Text("直接提取不需要服务器；需要同步旧库时才填写") },
+            supportingText = { Text("直接提取不需要服务器；10.0.2.2 仅供模拟器访问宿主机，真机不可用") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -78,5 +78,10 @@ fun SettingsScreen() {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        val version = remember(context) {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "未知"
+        }
+        Text("版本 $version", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
