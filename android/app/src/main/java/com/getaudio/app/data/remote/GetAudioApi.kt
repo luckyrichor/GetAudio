@@ -4,10 +4,33 @@ import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
 
 interface GetAudioApi {
+
+    @POST("agent/chat")
+    suspend fun agentChat(@Body body: AgentChatRequest): AgentChatResponse
+
+    @GET("agent/memories/{userId}")
+    suspend fun agentMemories(@Path("userId") userId: String): List<AgentMemoryOut>
+
+    @POST("agent/memories")
+    suspend fun agentMemoryCreate(@Body body: AgentMemoryRequest): AgentMemoryOut
+
+    @PUT("agent/memories/{userId}/{memoryId}")
+    suspend fun agentMemoryUpdate(
+        @Path("userId") userId: String,
+        @Path("memoryId") memoryId: Long,
+        @Body body: AgentMemoryUpdate,
+    ): AgentMemoryOut
+
+    @DELETE("agent/memories/{userId}/{memoryId}")
+    suspend fun agentMemoryDelete(
+        @Path("userId") userId: String,
+        @Path("memoryId") memoryId: Long,
+    ): Map<String, Boolean>
 
     @POST("extract")
     suspend fun extract(@Body body: ExtractRequest): ExtractResponse

@@ -145,3 +145,32 @@ class AudioFingerprint(Base):
     track_id: Mapped[int] = mapped_column(ForeignKey("tracks.id"), primary_key=True)
     values_json: Mapped[str] = mapped_column(Text, nullable=False)
     duration_sec: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class AgentMemory(Base):
+    """用户明确保存的音乐偏好；不从普通对话自动推断。"""
+
+    __tablename__ = "agent_memories"
+    __table_args__ = (Index("ix_agent_memories_user", "user_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    content: Mapped[str] = mapped_column(String(500), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    deleted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class AgentMemoryVersion(Base):
+    """偏好的不可覆盖历史；删除也写一条版本记录。"""
+
+    __tablename__ = "agent_memory_versions"
+    __table_args__ = (UniqueConstraint("memory_id", "revision", name="uq_agent_memory_revision"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    memory_id: Mapped[int] = mapped_column(ForeignKey("agent_memories.id"), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -17,7 +17,7 @@ DTO_FILE = Path(__file__).resolve().parent.parent / "android/app/src/main/java/c
 
 pytestmark = pytest.mark.skipif(not DTO_FILE.exists(), reason="Android 工程不存在")
 
-_CLASS_RE = re.compile(r"data class (\w+)\((.*?)\n\)", re.S)
+_CLASS_RE = re.compile(r"data class (\w+)\(\n(.*?)\n\)", re.S)
 _FIELD_RE = re.compile(
     r"(?:@SerialName\(\"(?P<ser>[^\"]+)\"\)\s*)?"
     r"val\s+(?P<name>\w+)\s*:",
@@ -56,6 +56,12 @@ KOTLIN = _kotlin_classes()
         ("LoginPollResponse", server_api.LoginPollResponse),
         ("CookieImportRequest", server_api.CookieImportRequest),
         ("CredentialDto", server_api.CredentialOut),
+        ("AgentChatRequest", server_api.AgentChatRequest),
+        ("AgentLocalTrack", server_api.AgentLocalTrack),
+        ("AgentChatResponse", server_api.AgentChatResponse),
+        ("AgentMemoryRequest", server_api.AgentMemoryRequest),
+        ("AgentMemoryUpdate", server_api.AgentMemoryUpdate),
+        ("AgentMemoryOut", server_api.AgentMemoryOut),
     ],
 )
 def test_dto_matches_server_model(kotlin_name, server_model):
@@ -88,6 +94,6 @@ def test_all_api_routes_are_declared_in_kotlin():
         skeleton = re.sub(r"\{[^}]+\}", "{}", path.lstrip("/"))
         found = any(
             re.sub(r"\{[^}]+\}", "{}", m) == skeleton
-            for m in re.findall(r'@(?:GET|POST|DELETE)\("([^"]+)"\)', src)
+            for m in re.findall(r'@(?:GET|POST|PUT|DELETE)\("([^"]+)"\)', src)
         )
         assert found, f"Android 端没有实现服务端路由 {path}"

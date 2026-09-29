@@ -85,3 +85,46 @@ data class CredentialDto(
 /** FastAPI 的错误体统一是 {"detail": "..."}，解出来直接给用户看。 */
 @Serializable
 data class ApiError(val detail: String? = null)
+
+@Serializable
+data class AgentChatRequest(
+    @SerialName("user_id") val userId: String,
+    val message: String,
+    @SerialName("local_tracks") val localTracks: List<AgentLocalTrack> = emptyList(),
+)
+
+@Serializable
+data class AgentLocalTrack(
+    val id: Long,
+    val title: String,
+    val artist: String? = null,
+    val platform: String,
+    @SerialName("duration_sec") val durationSec: Double? = null,
+    val categories: List<String> = emptyList(),
+)
+
+@Serializable
+data class AgentChatResponse(
+    val answer: String,
+    @SerialName("track_ids") val trackIds: List<Long>,
+    val model: String? = null,
+)
+
+@Serializable
+data class AgentMemoryRequest(
+    @SerialName("user_id") val userId: String,
+    val content: String,
+)
+
+@Serializable
+data class AgentMemoryUpdate(
+    val content: String,
+    @SerialName("expected_revision") val expectedRevision: Int,
+)
+
+@Serializable
+data class AgentMemoryOut(
+    val id: Long,
+    val content: String,
+    val revision: Int,
+)

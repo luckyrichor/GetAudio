@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -19,12 +20,14 @@ import com.getaudio.app.ui.screen.ExtractScreen
 import com.getaudio.app.ui.screen.LibraryScreen
 import com.getaudio.app.ui.screen.LoginScreen
 import com.getaudio.app.ui.screen.SettingsScreen
+import com.getaudio.app.ui.screen.AgentScreen
 import com.getaudio.app.ui.theme.GetAudioTheme
 import com.getaudio.app.data.repo.Settings
 
 private enum class Tab(val label: String, val icon: ImageVector) {
     LIBRARY("音频库", Icons.Default.LibraryMusic),
     EXTRACT("提取", Icons.Default.Link),
+    AGENT("助手", Icons.Default.Chat),
     LOGIN("云端登录", Icons.Default.Person),
     SETTINGS("设置", Icons.Default.Settings),
 }
@@ -71,6 +74,7 @@ class MainActivity : ComponentActivity() {
                         when (tab) {
                             Tab.LIBRARY -> LibraryScreen()
                             Tab.EXTRACT -> ExtractScreen(prefill = shared, onSharedConsumed = { shared = null })
+                            Tab.AGENT -> AgentScreen()
                             Tab.LOGIN -> LoginScreen()
                             Tab.SETTINGS -> SettingsScreen()
                         }

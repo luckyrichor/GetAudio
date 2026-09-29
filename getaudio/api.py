@@ -18,11 +18,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import credentials, login
+from . import agent, credentials, login
 from .config import settings
 from .db import SessionLocal, init_db
 from .extractors import ExtractorError, NeedsLoginError
-from .models import Track
+from .models import AgentMemory, Track
 from .pipeline import extract as run_extract
 from .sharelink import LinkError
 
@@ -139,11 +139,102 @@ class SyncResponse(BaseModel):
     has_more: bool
 
 
+class AgentLocalTrack(BaseModel):
+    id: int = Field(lt=0)
+    title: str = Field(min_length=1, max_length=200)
+    artist: str | None = Field(None, max_length=100)
+    platform: str = Field(max_length=32)
+    duration_sec: float | None = None
+    categories: list[str] = Field(default_factory=list, max_length=6)
+
+
+class AgentChatRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=1000)
+    local_tracks: list[AgentLocalTrack] = Field(default_factory=list, max_length=100)
+
+
+class AgentChatResponse(BaseModel):
+    answer: str
+    track_ids: list[int]
+    model: str | None
+
+
+class AgentMemoryRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=64)
+    content: str = Field(min_length=1, max_length=500)
+
+
+class AgentMemoryUpdate(BaseModel):
+    content: str = Field(min_length=1, max_length=500)
+    expected_revision: int = Field(ge=1)
+
+
+class AgentMemoryOut(BaseModel):
+    id: int
+    content: str
+    revision: int
+
+    @classmethod
+    def of(cls, memory: AgentMemory) -> "AgentMemoryOut":
+        return cls(id=memory.id, content=memory.content, revision=memory.revision)
+
+
 # ---------- 路由 ----------
 
 
 @app.get("/health")
 def health() -> dict:
+    return {"ok": True}
+
+
+@app.post("/agent/chat", response_model=AgentChatResponse)
+def api_agent_chat(req: AgentChatRequest, session: Session = Depends(get_session)) -> AgentChatResponse:
+    result, model = agent.answer(session, req.user_id, req.message.strip(),
+                                 [track.model_dump() for track in req.local_tracks])
+    return AgentChatResponse(answer=result.answer, track_ids=result.track_ids, model=model)
+
+
+@app.get("/agent/memories/{user_id}", response_model=list[AgentMemoryOut])
+def api_agent_memories(user_id: str, session: Session = Depends(get_session)) -> list[AgentMemoryOut]:
+    rows = session.scalars(select(AgentMemory).where(
+        AgentMemory.user_id == user_id, AgentMemory.deleted == 0).order_by(AgentMemory.id).limit(50))
+    return [AgentMemoryOut.of(row) for row in rows]
+
+
+@app.post("/agent/memories", response_model=AgentMemoryOut)
+def api_agent_memory_create(req: AgentMemoryRequest, session: Session = Depends(get_session)) -> AgentMemoryOut:
+    if not req.content.strip():
+        raise HTTPException(400, "偏好不能为空")
+    if len(api_agent_memories(req.user_id, session)) >= 50:
+        raise HTTPException(400, "最多保存 50 条音乐偏好")
+    row = agent.save_memory(session, req.user_id, req.content)
+    result = AgentMemoryOut.of(row)
+    session.commit()
+    return result
+
+
+@app.put("/agent/memories/{user_id}/{memory_id}", response_model=AgentMemoryOut)
+def api_agent_memory_update(user_id: str, memory_id: int, req: AgentMemoryUpdate,
+                            session: Session = Depends(get_session)) -> AgentMemoryOut:
+    if not req.content.strip():
+        raise HTTPException(400, "偏好不能为空")
+    try:
+        row = agent.update_memory(session, user_id, memory_id, req.expected_revision, req.content)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if row is None:
+        raise HTTPException(404, "偏好不存在")
+    result = AgentMemoryOut.of(row)
+    session.commit()
+    return result
+
+
+@app.delete("/agent/memories/{user_id}/{memory_id}")
+def api_agent_memory_delete(user_id: str, memory_id: int, session: Session = Depends(get_session)) -> dict:
+    if not agent.delete_memory(session, user_id, memory_id):
+        raise HTTPException(404, "偏好不存在")
+    session.commit()
     return {"ok": True}
 
 
