@@ -27,6 +27,8 @@ import com.getaudio.app.data.local.TrackEntity
 import com.getaudio.app.data.repo.CategoryRepository
 import com.getaudio.app.data.repo.PlaylistRepository
 import com.getaudio.app.data.repo.TrackRepository
+import com.getaudio.app.data.repo.Settings
+import com.getaudio.app.data.repo.ApiProvider
 import com.getaudio.app.player.PlayerHolder
 import kotlinx.coroutines.launch
 import java.io.File
@@ -57,6 +59,8 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
     var endDate by remember { mutableStateOf("") }
     var dateDialog by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
+    var syncing by remember { mutableStateOf(false) }
+    val serverUrl by remember(context) { Settings(context).serverUrl }.collectAsState(initial = "")
     var target by remember { mutableStateOf<LibraryTarget?>(null) }
     var dialog by remember { mutableStateOf<String?>(null) }
     var editText by remember { mutableStateOf("") }
@@ -117,6 +121,12 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
                     OutlinedTextField(query, { query = it }, label = { Text("搜索音频名称") }, singleLine = true, modifier = Modifier.weight(1f))
                     TextButton(onClick = { dateDialog = true }) { Text("日期") }
                 }
+                if (serverUrl.isNotBlank()) TextButton(onClick = { scope.launch {
+                    syncing = true
+                    runCatching { trackRepo.sync() }.onSuccess { notice = "已同步 $it 条" }
+                        .onFailure { notice = ApiProvider.humanMessage(it) }
+                    syncing = false
+                } }, enabled = !syncing) { Text(if (syncing) "同步中…" else "云端同步") }
                 if (startDate.isNotBlank() || endDate.isNotBlank()) {
                     TextButton(onClick = { startDate = ""; endDate = "" }) { Text("${startDate.ifBlank { "不限" }} ~ ${endDate.ifBlank { "不限" }} ×") }
                 }

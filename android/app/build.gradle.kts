@@ -13,8 +13,8 @@ android {
         applicationId = "com.getaudio.app"
         minSdk = 26          // Media3 和后台播放在 8.0 以下坑太多
         targetSdk = 34
-        versionCode = 10
-        versionName = "0.4.0"
+        versionCode = 11
+        versionName = "0.4.1"
 
     }
 

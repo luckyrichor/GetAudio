@@ -10,7 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [TrackEntity::class, SyncStateEntity::class, CategoryEntity::class,
         PlaylistEntity::class, PlaylistItemEntity::class, DeletedTrackEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -41,6 +41,16 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE TABLE IF NOT EXISTS playlists (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, name TEXT NOT NULL, createdAt INTEGER NOT NULL)")
                 db.execSQL("CREATE TABLE IF NOT EXISTS playlist_items (playlistId INTEGER NOT NULL, trackId INTEGER NOT NULL, addedAt INTEGER NOT NULL, orderIndex INTEGER NOT NULL, PRIMARY KEY(playlistId,trackId))")
                 db.execSQL("CREATE TABLE IF NOT EXISTS deleted_tracks (id INTEGER NOT NULL PRIMARY KEY)")
+                // 云端旧记录缺少真实时间，下次同步需重新拉取元数据补齐。
+                db.execSQL("UPDATE sync_state SET cursor = 0")
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tracks ADD COLUMN localTitleOverride TEXT")
+                db.execSQL("UPDATE tracks SET updatedAtMs = 0 WHERE id > 0")
+                db.execSQL("UPDATE sync_state SET cursor = 0")
             }
         }
 
@@ -59,7 +69,7 @@ abstract class AppDatabase : RoomDatabase() {
                         db.execSQL("INSERT OR IGNORE INTO categories (id,name,parentId,kind,createdAt,accessCount,lastAccessedAt) VALUES (1,'未分类',NULL,'LEAF',0,0,0)")
                     }
                 })
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
                 .also { instance = it }
         }

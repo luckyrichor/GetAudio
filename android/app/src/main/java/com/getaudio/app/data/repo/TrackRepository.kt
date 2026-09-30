@@ -136,6 +136,7 @@ class TrackRepository(private val context: Context) {
                 if (track.localPath == null) trackDao.setLocalPath(track.id, dest.absolutePath)
                 return@withLock dest
             }
+            if (track.id < 0) error("本机音频文件已丢失，请重新提取")
 
             val base = settings.serverUrlNow().trimEnd('/')
             val url = base + track.downloadUrl

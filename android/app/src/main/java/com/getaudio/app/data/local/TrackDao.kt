@@ -19,7 +19,7 @@ interface TrackDao {
     @Query("SELECT * FROM tracks")
     suspend fun allNow(): List<TrackEntity>
 
-    @Query("UPDATE tracks SET title = :title, updatedAtMs = :now WHERE id = :id")
+    @Query("UPDATE tracks SET title = :title, localTitleOverride = :title, updatedAtMs = :now WHERE id = :id")
     suspend fun rename(id: Long, title: String, now: Long)
 
     @Query("UPDATE tracks SET localCategoryId = :categoryId, updatedAtMs = :now WHERE id = :id")
@@ -85,7 +85,12 @@ interface TrackDao {
                 localPath = existing.localPath.takeIf { existing.audioSha256 == fresh.audioSha256 },
                 favorite = existing.favorite,
                 localCategoryId = existing.localCategoryId,
-                updatedAtMs = if (existing.updatedSeq == fresh.updatedSeq && existing.updatedAtMs > 0) existing.updatedAtMs else fresh.updatedAtMs,
+                title = existing.localTitleOverride ?: fresh.title,
+                localTitleOverride = existing.localTitleOverride,
+                updatedAtMs = if (existing.localTitleOverride != null)
+                    maxOf(existing.updatedAtMs, fresh.updatedAtMs)
+                else if (existing.updatedSeq == fresh.updatedSeq && existing.updatedAtMs > 0)
+                    existing.updatedAtMs else fresh.updatedAtMs,
             )
         }
         upsertAll(merged)
@@ -96,6 +101,8 @@ interface TrackDao {
         val existing = byId(track.id)
         upsertAll(listOf(track.copy(favorite = existing?.favorite ?: false,
             localCategoryId = existing?.localCategoryId ?: track.localCategoryId,
+            title = existing?.localTitleOverride ?: track.title,
+            localTitleOverride = existing?.localTitleOverride,
             updatedAtMs = System.currentTimeMillis())))
     }
 }

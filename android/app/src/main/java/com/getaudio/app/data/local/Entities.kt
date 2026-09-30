@@ -33,6 +33,8 @@ data class TrackEntity(
     val favorite: Boolean = false,
     @ColumnInfo(defaultValue = "1") val localCategoryId: Long = 1,
     @ColumnInfo(defaultValue = "0") val updatedAtMs: Long = 0,
+    /** 本机重命名后保留显示名，云端同步不覆盖。 */
+    val localTitleOverride: String? = null,
 )
 
 @Entity(tableName = "categories")
