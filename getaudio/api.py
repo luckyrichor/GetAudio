@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import json
+from datetime import timezone
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -68,6 +69,7 @@ class TrackOut(BaseModel):
     audio_sha256: str | None = None
     source_url: str
     updated_seq: int
+    updated_at_ms: int
     deleted: bool
     categories: list[str] = Field(default_factory=list)
     has_vocal: bool | None = None
@@ -91,6 +93,8 @@ class TrackOut(BaseModel):
             audio_sha256=t.audio_sha256,
             source_url=t.source_url,
             updated_seq=t.updated_seq,
+            updated_at_ms=int(t.updated_at.replace(tzinfo=timezone.utc).timestamp() * 1000)
+                if t.updated_at.tzinfo is None else int(t.updated_at.timestamp() * 1000),
             deleted=bool(t.deleted),
             download_url=f"/audio/{t.id}",
         )

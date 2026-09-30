@@ -16,6 +16,7 @@ data class TrackDto(
     @SerialName("audio_format") val audioFormat: String,
     @SerialName("source_url") val sourceUrl: String,
     @SerialName("updated_seq") val updatedSeq: Long,
+    @SerialName("updated_at_ms") val updatedAtMs: Long = 0,
     val deleted: Boolean,
     @SerialName("audio_sha256") val audioSha256: String? = null,
     val categories: List<String> = emptyList(),

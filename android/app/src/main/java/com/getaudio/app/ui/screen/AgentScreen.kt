@@ -39,7 +39,7 @@ class AgentViewModel(context: Context) : ViewModel() {
 
     private suspend fun apiAndUser(): Pair<GetAudioApi, String> {
         val url = settings.serverUrlNow()
-        require(url.isNotBlank()) { "请先在设置中填写服务器地址" }
+        require(url.isNotBlank()) { "请先在「我的 → 关于 → 开发者选项」填写服务器地址" }
         return ApiProvider.api(url) to settings.userId()
     }
 
@@ -125,7 +125,7 @@ fun AgentScreen() {
         Text("根据手机和服务器音频库推荐歌曲。提问、候选曲目的标题等元数据和已保存偏好会发送给服务器上的方舟模型；音频文件不会上传。聊天不会自动保存；只有明确点击保存才会记住偏好。",
             style = MaterialTheme.typography.bodySmall)
         if (!vm.serverReady) {
-            Text("请先在设置中填写服务器地址。手机直接提取音频仍可独立使用。")
+            Text("请先在「我的 → 关于 → 开发者选项」填写服务器地址。")
             return@Column
         }
         vm.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }

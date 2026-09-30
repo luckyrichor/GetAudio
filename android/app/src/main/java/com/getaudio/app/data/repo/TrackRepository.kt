@@ -37,6 +37,30 @@ class TrackRepository(private val context: Context) {
     fun byPlatform(p: String): Flow<List<TrackEntity>> = trackDao.byPlatform(p)
     fun favorites(): Flow<List<TrackEntity>> = trackDao.favorites()
 
+    fun allWithTimeRange(q: String, startMs: Long?, endMs: Long?) =
+        trackDao.allWithTimeRange(q, startMs, endMs)
+
+    fun inCategory(categoryId: Long) = trackDao.inCategory(categoryId)
+
+    suspend fun allNow(): List<TrackEntity> = trackDao.allNow()
+
+    suspend fun byId(id: Long): TrackEntity? = trackDao.byId(id)
+
+    suspend fun rename(id: Long, title: String) {
+        require(title.isNotBlank()) { "音频名称不能为空" }
+        trackDao.rename(id, title.trim(), System.currentTimeMillis())
+    }
+
+    suspend fun remove(id: Long) {
+        val track = trackDao.byId(id) ?: return
+        fileMutex.withLock {
+            if (id > 0) trackDao.suppress(id)
+            db.playlistDao().removeTrack(id)
+            trackDao.delete(id)
+        }
+        track.localPath?.let { File(it).delete() }
+    }
+
     suspend fun setFavorite(id: Long, fav: Boolean) = trackDao.setFavorite(id, fav)
 
     // ---------- 提取 ----------
@@ -58,7 +82,7 @@ class TrackRepository(private val context: Context) {
         text: String, onDiagnostic: (String) -> Unit = {},
     ): Result<TrackEntity> = runCatching {
         val base = settings.serverUrlNow()
-        require(base.isNotBlank()) { "请先到设置填写并保存服务器地址" }
+        require(base.isNotBlank()) { "请先到「我的 → 关于 → 开发者选项」填写服务器地址" }
         onDiagnostic("服务器提取：已提交，等待处理")
         val response = ApiProvider.api(base).extract(
             ExtractRequest(text = text, userId = settings.userId()),
@@ -171,6 +195,7 @@ private fun TrackDto.toEntity() = TrackEntity(
     sourceUrl = sourceUrl,
     downloadUrl = downloadUrl,
     updatedSeq = updatedSeq,
+    updatedAtMs = updatedAtMs.takeIf { it > 0 } ?: System.currentTimeMillis(),
     audioSha256 = audioSha256,
     categories = categories.joinToString(" · "),
     hasVocal = hasVocal,

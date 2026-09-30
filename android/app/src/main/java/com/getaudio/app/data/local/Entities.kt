@@ -2,6 +2,7 @@ package com.getaudio.app.data.local
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import androidx.room.ColumnInfo
 
 /**
  * 本地音频库。
@@ -30,7 +31,40 @@ data class TrackEntity(
     /** 本地文件路径；null 表示还没下载 */
     val localPath: String? = null,
     val favorite: Boolean = false,
+    @ColumnInfo(defaultValue = "1") val localCategoryId: Long = 1,
+    @ColumnInfo(defaultValue = "0") val updatedAtMs: Long = 0,
 )
+
+@Entity(tableName = "categories")
+data class CategoryEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val parentId: Long? = null,
+    /** null=空类别，CONTAINER=子类别，LEAF=音频。 */
+    val kind: String? = null,
+    val createdAt: Long = System.currentTimeMillis(),
+    val accessCount: Int = 0,
+    val lastAccessedAt: Long = 0,
+)
+
+@Entity(tableName = "playlists")
+data class PlaylistEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val createdAt: Long = System.currentTimeMillis(),
+)
+
+@Entity(tableName = "playlist_items", primaryKeys = ["playlistId", "trackId"])
+data class PlaylistItemEntity(
+    val playlistId: Long,
+    val trackId: Long,
+    val addedAt: Long = System.currentTimeMillis(),
+    val orderIndex: Int,
+)
+
+/** 本机删除的云端曲目，避免下次同步又出现。 */
+@Entity(tableName = "deleted_tracks")
+data class DeletedTrackEntity(@PrimaryKey val id: Long)
 
 /** 同步游标等单例配置。只有一行，id 固定为 0。 */
 @Entity(tableName = "sync_state")

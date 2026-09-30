@@ -1,12 +1,9 @@
 package com.getaudio.app.ui.screen
 
 import android.content.ClipboardManager
-import android.content.ClipData
 import android.content.Context
 import android.os.SystemClock
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -19,9 +16,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.getaudio.app.data.local.TrackEntity
 import com.getaudio.app.data.repo.ApiProvider
 import com.getaudio.app.data.repo.TrackRepository
+import com.getaudio.app.data.repo.DiagnosticsStore
+import com.getaudio.app.data.repo.Settings
 import com.getaudio.app.ui.formatDuration
-import com.getaudio.app.ui.formatSize
-import com.getaudio.app.ui.platformLabel
 import kotlinx.coroutines.launch
 
 class ExtractViewModel(private val repo: TrackRepository, private val version: String) : ViewModel() {
@@ -33,15 +30,12 @@ class ExtractViewModel(private val repo: TrackRepository, private val version: S
         private set
     var error by mutableStateOf<String?>(null)
         private set
-    var diagnostics by mutableStateOf<List<String>>(emptyList())
-        private set
     var usingServer by mutableStateOf(false)
         private set
     private var startedAt = 0L
 
     private fun record(message: String) {
-        val seconds = (SystemClock.elapsedRealtime() - startedAt) / 1000
-        diagnostics = (diagnostics + "[+${seconds}s] $message").takeLast(60)
+        DiagnosticsStore.record(startedAt, message)
     }
 
     fun submit() {
@@ -53,7 +47,7 @@ class ExtractViewModel(private val repo: TrackRepository, private val version: S
             error = null
             result = null
             startedAt = SystemClock.elapsedRealtime()
-            diagnostics = listOf("GetAudio $version · 手机直提取（未使用 GetAudio 服务器）")
+            DiagnosticsStore.beginLocal(version)
             repo.extract(text, ::record)
                 .onSuccess { result = it }
                 .onFailure {
@@ -72,10 +66,8 @@ class ExtractViewModel(private val repo: TrackRepository, private val version: S
             usingServer = true
             error = null
             result = null
-            if (diagnostics.isEmpty()) {
-                startedAt = SystemClock.elapsedRealtime()
-                diagnostics = listOf("GetAudio $version · 手动服务器提取")
-            }
+            startedAt = SystemClock.elapsedRealtime()
+            DiagnosticsStore.beginServer(version)
             record("手动选择服务器提取")
             repo.extractViaServer(text, ::record)
                 .onSuccess { result = it }
@@ -117,8 +109,10 @@ class ExtractViewModel(private val repo: TrackRepository, private val version: S
 fun ExtractScreen(prefill: String? = null, onSharedConsumed: () -> Unit = {}) {
     val context = LocalContext.current
     val vm: ExtractViewModel = viewModel(factory = ExtractViewModel.Factory(context))
+    val snackbar = remember { SnackbarHostState() }
+    var pasteDialog by remember { mutableStateOf(false) }
+    val serverUrl by remember(context) { Settings(context).serverUrl }.collectAsState(initial = "")
 
-    // 从别的 App 分享进来的内容优先；否则试试剪贴板
     LaunchedEffect(prefill) {
         if (!prefill.isNullOrBlank()) {
             vm.input = prefill
@@ -126,97 +120,35 @@ fun ExtractScreen(prefill: String? = null, onSharedConsumed: () -> Unit = {}) {
             vm.submit()
         } else if (vm.input.isBlank()) vm.pasteFromClipboard(context)
     }
+    LaunchedEffect(vm.result) {
+        vm.result?.let { snackbar.showSnackbar("${it.title} · ${formatDuration(it.durationSec)} · 已加入音频库", withDismissAction = true, duration = SnackbarDuration.Short) }
+    }
+    LaunchedEffect(vm.error) {
+        vm.error?.let { snackbar.showSnackbar(it, withDismissAction = true, duration = SnackbarDuration.Short) }
+    }
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text("粘贴分享链接", style = MaterialTheme.typography.titleMedium)
-        Text(
-            "整段分享文案直接贴进来就行，不用自己抠链接。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        OutlinedTextField(
-            value = vm.input,
-            onValueChange = { vm.input = it },
-            label = { Text("分享文本 / 链接 / BV 号") },
-            minLines = 3,
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = vm::submit, enabled = vm.input.isNotBlank() && !vm.busy) {
-                Text(if (vm.busy) "提取中…" else "提取音频")
+    Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("提取音频", style = MaterialTheme.typography.titleLarge)
+            Button(onClick = { if (vm.input.isBlank()) vm.pasteFromClipboard(context); if (vm.input.isBlank()) pasteDialog = true else vm.submit() }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth()) {
+                Text(if (vm.busy && !vm.usingServer) "提取中…" else "本地提取")
             }
-            OutlinedButton(onClick = { vm.pasteFromClipboard(context) }, enabled = !vm.busy) {
-                Text("读剪贴板")
+            OutlinedButton(onClick = { vm.pasteFromClipboard(context); pasteDialog = true }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth()) { Text("粘贴文本") }
+            OutlinedButton(onClick = { if (vm.input.isBlank()) vm.pasteFromClipboard(context); if (vm.input.isBlank()) pasteDialog = true else vm.submitViaServer() }, enabled = !vm.busy && serverUrl.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
+                Text(if (vm.busy && vm.usingServer) "提取中…" else "服务器提取")
             }
-        }
-
-        if (vm.busy) {
-            LinearProgressIndicator(Modifier.fillMaxWidth())
-            Text(
-                if (vm.usingServer) "服务器正在提取，完成后会下载到手机；长视频可能要等一会儿。"
-                else "手机正在下载并抽取音轨，长视频可能要等一会儿。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        vm.error?.let {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-                Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onErrorContainer)
+            if (serverUrl.isBlank()) Text("未配置服务器，可在「我的 → 关于 → 开发者选项」设置", style = MaterialTheme.typography.bodySmall)
+            if (vm.busy) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                Text(if (vm.usingServer) "服务器正在提取并下载到手机" else "手机正在解析并下载音频", style = MaterialTheme.typography.bodySmall)
             }
-        }
-
-        OutlinedButton(onClick = vm::submitViaServer, enabled = !vm.busy && vm.input.isNotBlank()) {
-            Text("通过服务器提取（可选）")
-        }
-        Text(
-            "仅点击此按钮才会将分享文本发给设置中的服务器；需要先填写并保存服务器地址。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        vm.result?.let { t ->
-            Card {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("提取成功", style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.primary)
-                    Text(t.title, style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "${platformLabel(t.platform)} · ${t.uploader ?: "-"} · " +
-                            "${formatDuration(t.durationSec)} · ${formatSize(t.audioBytes)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text("已加入音频库，去「音频库」页播放。",
-                        style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-
-        if (vm.diagnostics.isNotEmpty()) {
-            Card {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("提取诊断", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        "遇到失败时复制下面的信息发给开发者。只记录步骤、状态码和大小，不记录 Cookie 或完整媒体地址。",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    vm.diagnostics.forEach { line ->
-                        Text(line, style = MaterialTheme.typography.bodySmall)
-                    }
-                    OutlinedButton(onClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText(
-                            "GetAudio 提取诊断", vm.diagnostics.joinToString("\n"),
-                        ))
-                    }) { Text("复制诊断") }
-                }
-            }
+            ExtractionDiagnostics()
         }
     }
+    if (pasteDialog) AlertDialog(onDismissRequest = { pasteDialog = false }, title = { Text("粘贴分享文本") },
+        text = { OutlinedTextField(vm.input, { vm.input = it }, label = { Text("分享文本或链接") }, minLines = 3, modifier = Modifier.fillMaxWidth()) },
+        confirmButton = { Row {
+            TextButton(onClick = { pasteDialog = false; vm.submit() }, enabled = vm.input.isNotBlank()) { Text("本地提取") }
+            TextButton(onClick = { pasteDialog = false; vm.submitViaServer() }, enabled = vm.input.isNotBlank() && serverUrl.isNotBlank()) { Text("服务器提取") }
+        } }, dismissButton = { TextButton(onClick = { pasteDialog = false }) { Text("取消") } })
 }
