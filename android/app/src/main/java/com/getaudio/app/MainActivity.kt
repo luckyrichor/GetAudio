@@ -50,7 +50,7 @@ class MainActivity : ComponentActivity() {
                 Scaffold(
                     bottomBar = {
                         Column {
-                            QueueBar()
+                            if (tab == Tab.LIBRARY) QueueBar()
                             NavigationBar {
                             Tab.entries.forEach { t ->
                                 NavigationBarItem(

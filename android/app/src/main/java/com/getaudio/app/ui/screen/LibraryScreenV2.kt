@@ -4,6 +4,10 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -11,16 +15,22 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import com.getaudio.app.data.local.AppDatabase
 import com.getaudio.app.data.local.CategoryEntity
 import com.getaudio.app.data.local.TrackEntity
@@ -32,8 +42,6 @@ import com.getaudio.app.data.repo.ApiProvider
 import com.getaudio.app.player.PlayerHolder
 import kotlinx.coroutines.launch
 import java.io.File
-import java.time.LocalDate
-import java.time.ZoneId
 
 private sealed interface LibraryTarget {
     data class Audio(val track: TrackEntity) : LibraryTarget
@@ -51,12 +59,15 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
     val allCategories by categoryRepo.observeAll().collectAsState(initial = emptyList())
     val frequent by categoryRepo.frequent().collectAsState(initial = emptyList())
     val playlists by playlistRepo.observeAll().collectAsState(initial = emptyList())
+    val sourcePlaylistId by PlayerHolder.sourcePlaylistId.collectAsState()
+    val currentPlaylistId = sourcePlaylistId?.takeIf { id -> playlists.any { it.id == id } } ?: playlists.firstOrNull { it.isDefault }?.id
+    val currentListName = playlists.firstOrNull { it.id == currentPlaylistId }?.name ?: "播放列表"
     var section by remember { mutableIntStateOf(0) }
     LaunchedEffect(openCategories) { if (openCategories) section = 1 }
     var categoryId by remember { mutableStateOf<Long?>(null) }
     var query by remember { mutableStateOf("") }
-    var startDate by remember { mutableStateOf("") }
-    var endDate by remember { mutableStateOf("") }
+    var startMs by remember { mutableStateOf<Long?>(null) }
+    var endTimeMs by remember { mutableStateOf<Long?>(null) }
     var dateDialog by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var syncing by remember { mutableStateOf(false) }
@@ -67,12 +78,16 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
     var selectedParent by remember { mutableStateOf<Long?>(null) }
     var exportTrack by remember { mutableStateOf<TrackEntity?>(null) }
     var playlistId by remember { mutableStateOf<Long?>(null) }
+    val selectedListName = playlists.firstOrNull { it.id == playlistId }?.name ?: "播放列表"
+    var deletePlaylistId by remember { mutableStateOf<Long?>(null) }
     var playlistSearch by remember { mutableStateOf("") }
     var playlistPickMode by remember { mutableIntStateOf(0) }
     var selectedTracks by remember { mutableStateOf(setOf<Long>()) }
     var selectedCategories by remember { mutableStateOf(setOf<Long>()) }
-    val startMs = remember(startDate) { parseDate(startDate) }
-    val endMs = remember(endDate) { parseDate(endDate)?.plus(86_399_999L) }
+    val endMs = endTimeMs?.plus(59_999L)
+    val mode by PlayerHolder.mode.collectAsState()
+    val timer = timerStatus()
+    LaunchedEffect(Unit) { playlistRepo.ensureDefault() }
     val allTracks by db.trackDao().allWithTimeRange(query, startMs, endMs).collectAsState(initial = emptyList())
     val libraryTracks by db.trackDao().observeAll().collectAsState(initial = emptyList())
     val categoryTracks by db.trackDao().inCategory(categoryId ?: -1L).collectAsState(initial = emptyList())
@@ -90,7 +105,7 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
     LaunchedEffect(notice) { notice?.let { snackbar.showSnackbar(it); notice = null } }
 
     fun operate(block: suspend () -> Unit) { scope.launch { runCatching { block() }.onFailure { notice = it.message ?: "操作失败" } } }
-    fun queueItems(tracks: List<TrackEntity>, play: Boolean) = operate {
+    fun queueItems(tracks: List<TrackEntity>, play: Boolean, sourceId: Long? = null) = operate {
         val ready = mutableListOf<PlayerHolder.QueueItem>()
         for (track in tracks) {
             val path = track.localPath?.takeIf { File(it).exists() }
@@ -98,8 +113,14 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
             ready += PlayerHolder.QueueItem(track, path)
         }
         if (ready.isEmpty()) notice = "类别内没有音频"
-        else if (play) PlayerHolder.playAll(context, ready)
-        else PlayerHolder.append(context, ready)
+        else if (play) {
+            if (sourceId == null) PlayerHolder.playSelection(context, ready)
+            else PlayerHolder.playAll(context, ready, sourceId)
+        }
+        else {
+            val count = PlayerHolder.append(context, ready)
+            notice = if (count == 0) "音频已在播放列表中" else "已加入 $count 个音频"
+        }
     }
     fun targetTracks(item: LibraryTarget) = operate {
         val tracks = when (item) {
@@ -111,34 +132,60 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
 
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                Tab(selected = section == 0, onClick = { section = 0 }, text = { Text("全部音频") }, modifier = Modifier.weight(1f))
-                Tab(selected = section == 1, onClick = { section = 1; categoryId = null }, text = { Text("类别") }, modifier = Modifier.weight(1f))
-            }
-            HorizontalDivider()
-            if (section == 0) {
-                Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(query, { query = it }, label = { Text("搜索音频名称") }, singleLine = true, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { dateDialog = true }) { Text("日期") }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+                .height(48.dp).regionFrame(), verticalAlignment = Alignment.CenterVertically) {
+                listOf("全部音频", "类别").forEachIndexed { index, label ->
+                    if (index > 0) VerticalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f))
+                    val selected = section == index
+                    Box(Modifier.weight(1f).fillMaxHeight()
+                        .background(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
+                        .selectable(selected = selected, role = Role.Tab, onClick = {
+                            section = index
+                            if (index == 1) categoryId = null
+                        }), contentAlignment = Alignment.Center) {
+                        Text(label, style = MaterialTheme.typography.titleSmall,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
-                if (serverUrl.isNotBlank()) TextButton(onClick = { scope.launch {
-                    syncing = true
-                    runCatching { trackRepo.sync() }.onSuccess { notice = "已同步 $it 条" }
-                        .onFailure { notice = ApiProvider.humanMessage(it) }
-                    syncing = false
-                } }, enabled = !syncing) { Text(if (syncing) "同步中…" else "云端同步") }
-                if (startDate.isNotBlank() || endDate.isNotBlank()) {
-                    TextButton(onClick = { startDate = ""; endDate = "" }) { Text("${startDate.ifBlank { "不限" }} ~ ${endDate.ifBlank { "不限" }} ×") }
+            }
+            if (section == 0) {
+                Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(query, { query = it }, label = { Text("搜索音频名称") }, singleLine = true, modifier = Modifier.weight(1f))
+                    AreaButton(onClick = { dateDialog = true }, modifier = Modifier.padding(top = 8.dp).height(56.dp)) { Text("日期", style = MaterialTheme.typography.bodyLarge) }
+                }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (serverUrl.isNotBlank()) AreaButton(onClick = { scope.launch {
+                        syncing = true
+                        runCatching { trackRepo.sync() }.onSuccess { notice = "已同步 $it 条" }
+                            .onFailure { notice = ApiProvider.humanMessage(it) }
+                        syncing = false
+                    } }, enabled = !syncing, tone = ActionTone.SYNC) { Text(if (syncing) "同步中…" else "云端同步") }
+                    if (timer != null) {
+                        Text(if (timer.contains(":")) "剩余 $timer" else timer,
+                            modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary)
+                        AreaButton(onClick = { PlayerHolder.cancelTimer(); notice = "已取消定时播放" }, tone = ActionTone.TIMER) {
+                            Text("取消定时播放")
+                        }
+                    }
+                }
+                if (startMs != null || endTimeMs != null) {
+                    AreaButton(onClick = { startMs = null; endTimeMs = null }) { Text("${startMs?.let { displayDateTime(it) } ?: "不限"} ~ ${endTimeMs?.let { displayDateTime(it) } ?: "不限"} ×") }
                 }
                 if (allTracks.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("暂无音频") }
                 else LazyColumn { items(allTracks, key = { it.id }) { track ->
                     LibraryAudioRow(track, onPlay = { queueItems(listOf(track), true) }, onMore = { target = LibraryTarget.Audio(track) })
-                    HorizontalDivider()
                 } }
             } else {
                 val parent = allCategories.firstOrNull { it.id == categoryId }
                 if (parent != null) {
-                    TextButton(onClick = { categoryId = parent.parentId }) { Text("‹ ${parent.name} / 返回") }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        AreaButton(onClick = { categoryId = parent.parentId }) { Text("‹ 返回") }
+                        Text(categoryPath(parent, allCategories), modifier = Modifier.weight(1f).padding(start = 20.dp, end = 16.dp),
+                            maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+                    }
                 } else if (frequent.any { it.accessCount > 0 }) {
                     Text("常用类别", Modifier.padding(16.dp, 8.dp), style = MaterialTheme.typography.titleSmall)
                     Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
@@ -151,107 +198,156 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
                 val children = allCategories.filter { it.parentId == categoryId }
                 if (categoryId == null) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        TextButton(onClick = { dialog = "newCategory"; editText = ""; selectedParent = null }) { Text("＋ 新建类别") }
-                        TextButton(onClick = { dialog = "playlists" }) { Text("播放列表") }
+                        AreaButton(onClick = { dialog = "newCategory"; editText = ""; selectedParent = null }, tone = ActionTone.CONFIRM) { Text("＋ 新建类别") }
+                        AreaButton(onClick = { dialog = "playlists" }) { Text("播放列表") }
                     }
                 } else if (parent?.kind != "LEAF") {
-                    TextButton(onClick = { dialog = "newCategory"; editText = ""; selectedParent = categoryId }) { Text("＋ 新建子类别") }
+                    AreaButton(onClick = { dialog = "newCategory"; editText = ""; selectedParent = categoryId }, tone = ActionTone.CONFIRM) { Text("＋ 新建子类别") }
                 }
                 if (children.isEmpty() && categoryTracks.isEmpty()) Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { Text("这里还没有内容") }
                 LazyColumn {
                     items(children, key = { "c${it.id}" }) { cat ->
                         val count = if (cat.kind == "CONTAINER") allCategories.count { it.parentId == cat.id }
                             else libraryTracks.count { it.localCategoryId == cat.id }
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { targetTracks(LibraryTarget.Category(cat)) }) { Icon(Icons.Default.PlayArrow, "播放类别") }
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).regionFrame().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Folder, null)
                             Column(Modifier.weight(1f).clickable { categoryId = cat.id; operate { categoryRepo.recordAccess(cat.id) } }.padding(12.dp)) {
                                 Text(cat.name)
                                 Text(if (cat.kind == "CONTAINER") "$count 个类别" else "$count 首音频", style = MaterialTheme.typography.bodySmall)
                             }
+                            IconButton(onClick = { targetTracks(LibraryTarget.Category(cat)) }) { Icon(Icons.Default.PlayArrow, "播放类别") }
                             IconButton(onClick = { target = LibraryTarget.Category(cat) }) { Icon(Icons.Default.MoreVert, "更多") }
                         }
-                        HorizontalDivider()
                     }
                     items(categoryTracks, key = { "t${it.id}" }) { track ->
                         LibraryAudioRow(track, onPlay = { queueItems(listOf(track), true) }, onMore = { target = LibraryTarget.Audio(track) })
-                        HorizontalDivider()
                     }
                 }
             }
         }
     }
 
-    if (dateDialog) AlertDialog(onDismissRequest = { dateDialog = false }, title = { Text("更新时间范围") },
-        text = { Column { OutlinedTextField(startDate, { startDate = it }, label = { Text("开始 YYYY-MM-DD") }); OutlinedTextField(endDate, { endDate = it }, label = { Text("截止 YYYY-MM-DD") }) } },
-        confirmButton = { TextButton(onClick = { if ((startDate.isBlank() || startMs != null) && (endDate.isBlank() || endMs != null)) dateDialog = false else notice = "日期格式应为 YYYY-MM-DD" }) { Text("确定") } },
-        dismissButton = { TextButton(onClick = { dateDialog = false }) { Text("取消") } })
+    if (dateDialog) DateTimeRangeDialog(startMs, endTimeMs, onClose = { dateDialog = false }, onApply = { from, until ->
+        startMs = from; endTimeMs = until; dateDialog = false
+    })
 
     if (dialog == null) target?.let { item ->
-        AlertDialog(onDismissRequest = { target = null }, title = { Text(if (item is LibraryTarget.Audio) item.track.title else (item as LibraryTarget.Category).category.name) },
-            text = { Column {
-                TextButton(onClick = { target = null; operate { val tracks = if (item is LibraryTarget.Audio) listOf(item.track) else categoryRepo.recursiveTracks((item as LibraryTarget.Category).category.id); queueItems(tracks, false) } }) { Text("加入当前列表") }
-                TextButton(onClick = { target = null; dialog = "playlists" }) { Text("播放列表") }
-                TextButton(onClick = { target = null; dialog = "mode" }) { Text("播放方式") }
-                TextButton(onClick = { target = null; dialog = "timer" }) { Text("定时播放") }
-                HorizontalDivider()
+        AlertDialog(onDismissRequest = { target = null }, containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp,
+            title = { Text(if (item is LibraryTarget.Audio) item.track.title else (item as LibraryTarget.Category).category.name,
+                fontSize = 18.sp, lineHeight = 25.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            text = { Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                MusicMenuAction("加入当前播放列表", Icons.AutoMirrored.Filled.PlaylistAdd, featured = true, status = currentListName, onClick = {
+                    target = null
+                    operate { val tracks = if (item is LibraryTarget.Audio) listOf(item.track) else categoryRepo.recursiveTracks((item as LibraryTarget.Category).category.id); queueItems(tracks, false) }
+                })
+                MusicMenuAction("加入其他播放列表", Icons.AutoMirrored.Filled.QueueMusic, onClick = { dialog = "addToPlaylist" })
+                MusicMenuAction("播放列表", Icons.Default.LibraryMusic, onClick = { target = null; dialog = "playlists" })
+                MusicMenuAction("播放方式", Icons.Default.Repeat, status = mode.label, onClick = { target = null; dialog = "mode" })
+                MusicMenuAction("定时播放", Icons.Default.Timer, status = timer ?: "未设置", onClick = { target = null; dialog = "timer" })
+                if (timer != null) MusicMenuAction("取消定时播放", Icons.Default.TimerOff, onClick = { PlayerHolder.cancelTimer(); target = null; notice = "已取消定时播放" })
+                HorizontalDivider(Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 if (item !is LibraryTarget.Category || item.category.id != 1L) {
-                    TextButton(onClick = { editText = if (item is LibraryTarget.Audio) item.track.title else (item as LibraryTarget.Category).category.name; dialog = "rename" }) { Text("重命名") }
-                    TextButton(onClick = { selectedParent = null; dialog = "move" }) { Text("移动到…") }
-                    TextButton(onClick = { dialog = "delete" }) { Text("删除") }
+                    MusicMenuAction("重命名", Icons.Default.Edit, onClick = { editText = if (item is LibraryTarget.Audio) item.track.title else (item as LibraryTarget.Category).category.name; dialog = "rename" })
+                    MusicMenuAction("移动到…", Icons.AutoMirrored.Filled.DriveFileMove, onClick = { selectedParent = null; dialog = "move" })
+                    MusicMenuAction("删除", Icons.Default.DeleteOutline, destructive = true, onClick = { dialog = "delete" })
                 }
-                if (item is LibraryTarget.Audio) TextButton(onClick = { exportTrack = item.track; target = null; exportLauncher.launch("${item.track.title.take(60)}.${item.track.audioFormat}") }) { Text("导出") }
-                if (item is LibraryTarget.Category && item.category.kind != "LEAF") TextButton(onClick = { selectedParent = item.category.id; editText = ""; target = null; dialog = "newCategory" }) { Text("新建子类别") }
-            } }, confirmButton = { TextButton(onClick = { target = null }) { Text("关闭") } })
+                if (item is LibraryTarget.Audio) MusicMenuAction("导出", Icons.Default.IosShare, onClick = { exportTrack = item.track; target = null; exportLauncher.launch("${item.track.title.take(60)}.${item.track.audioFormat}") })
+                if (item is LibraryTarget.Category && item.category.kind != "LEAF") MusicMenuAction("新建子类别", Icons.Default.CreateNewFolder, onClick = { selectedParent = item.category.id; editText = ""; target = null; dialog = "newCategory" })
+            } }, confirmButton = { AreaButton(onClick = { target = null }) { Text("关闭") } })
     }
     when (dialog) {
         "newCategory", "rename", "newPlaylist", "renamePlaylist" -> AlertDialog(onDismissRequest = { dialog = null }, title = { Text(when (dialog) { "newCategory" -> "新建类别"; "newPlaylist" -> "新建播放列表"; else -> "重命名" }) },
-            text = { OutlinedTextField(editText, { editText = it }, label = { Text("名称") }) },
-            confirmButton = { TextButton(onClick = {
+            text = { Column {
+                NameEditor(editText, { editText = it })
+                if (dialog == "newPlaylist") Text("不填写名称时，自动命名为${com.getaudio.app.data.repo.playlistName("", playlists.map { it.name })}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+            } },
+            confirmButton = { AreaButton(onClick = {
                 val action = dialog; val item = target; val name = editText.trim(); dialog = null; target = null
                 operate { when (action) {
                     "newCategory" -> categoryRepo.create(name, selectedParent)
                     "rename" -> when (item) { is LibraryTarget.Audio -> trackRepo.rename(item.track.id, name); is LibraryTarget.Category -> categoryRepo.rename(item.category.id, name); else -> Unit }
-                    "newPlaylist" -> playlistRepo.create(name)
+                    "newPlaylist" -> { playlistId = playlistRepo.create(name); dialog = "playlistEdit" }
                     "renamePlaylist" -> playlistId?.let { playlistRepo.rename(it, name) }
                 } }
-            }) { Text("保存") } }, dismissButton = { TextButton(onClick = { dialog = null; target = null }) { Text("取消") } })
+            }, tone = ActionTone.CONFIRM) { Text("保存") } }, dismissButton = { AreaButton(onClick = { dialog = null; target = null }) { Text("取消") } })
         "move" -> AlertDialog(onDismissRequest = { dialog = null; target = null }, title = { Text("移动到类别") },
-            text = { Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-                if (target is LibraryTarget.Category) TextButton(onClick = { selectedParent = null }) { Text("根目录 ${if (selectedParent == null) "✓" else ""}") }
+            text = { Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (target is LibraryTarget.Category) AreaAction(onClick = { selectedParent = null }) { Text("根目录 ${if (selectedParent == null) "✓" else ""}") }
                 allCategories.filter { cat -> cat.id != (target as? LibraryTarget.Category)?.category?.id && (target is LibraryTarget.Category && cat.kind != "LEAF" || target is LibraryTarget.Audio && cat.kind != "CONTAINER") }.forEach { cat ->
-                    TextButton(onClick = { selectedParent = cat.id }) { Text("${categoryPath(cat, allCategories)} ${if (selectedParent == cat.id) "✓" else ""}") }
+                    AreaAction(onClick = { selectedParent = cat.id }) { Text("${categoryPath(cat, allCategories)} ${if (selectedParent == cat.id) "✓" else ""}") }
                 }
-            } }, confirmButton = { TextButton(onClick = { val item = target; val dest = selectedParent; dialog = null; target = null; operate { when (item) {
+            } }, confirmButton = { AreaButton(onClick = { val item = target; val dest = selectedParent; dialog = null; target = null; operate { when (item) {
                 is LibraryTarget.Audio -> categoryRepo.moveTrack(item.track.id, dest ?: error("请选择目标类别"))
                 is LibraryTarget.Category -> categoryRepo.moveCategory(item.category.id, dest)
                 else -> Unit
-            } } }) { Text("移动") } }, dismissButton = { TextButton(onClick = { dialog = null; target = null }) { Text("取消") } })
+            } } }) { Text("移动") } }, dismissButton = { AreaButton(onClick = { dialog = null; target = null }) { Text("取消") } })
         "delete" -> {
             val item = target
             var count by remember(item) { mutableIntStateOf(0) }
             LaunchedEffect(item) { if (item is LibraryTarget.Category) count = categoryRepo.recursiveTracks(item.category.id).size }
             AlertDialog(onDismissRequest = { dialog = null; target = null }, title = { Text("确认删除") },
                 text = { Text(if (item is LibraryTarget.Category) "删除该类别将同时删除其中的 $count 首音频，是否继续？" else "删除这首音频？") },
-                confirmButton = { TextButton(onClick = { dialog = null; target = null; operate { when (item) { is LibraryTarget.Audio -> trackRepo.remove(item.track.id); is LibraryTarget.Category -> categoryRepo.delete(item.category.id); else -> Unit } } }) { Text("删除") } },
-                dismissButton = { TextButton(onClick = { dialog = null; target = null }) { Text("取消") } })
+                confirmButton = { AreaButton(onClick = { dialog = null; target = null; operate { when (item) { is LibraryTarget.Audio -> trackRepo.remove(item.track.id); is LibraryTarget.Category -> categoryRepo.delete(item.category.id); else -> Unit } } }, tone = ActionTone.DESTRUCTIVE) { Text("删除") } },
+                dismissButton = { AreaButton(onClick = { dialog = null; target = null }) { Text("取消") } })
         }
-        "mode" -> AlertDialog(onDismissRequest = { dialog = null }, title = { Text("播放方式") }, text = { Column { PlayerHolder.Mode.entries.forEach { mode -> TextButton(onClick = { operate { PlayerHolder.setMode(context, mode) }; dialog = null }) { Text(mode.label) } } } }, confirmButton = { TextButton(onClick = { dialog = null }) { Text("关闭") } })
+        "deletePlaylist" -> {
+            val list = playlists.firstOrNull { it.id == deletePlaylistId }
+            AlertDialog(onDismissRequest = { dialog = "playlists" }, title = { Text("删除播放列表？") },
+                text = { Text("删除「${list?.name.orEmpty()}」及其列表记录，音频库中的文件会保留。" +
+                    if (list?.id == currentPlaylistId) "当前列表的播放会停止。" else "") },
+                confirmButton = { TextButton(onClick = {
+                    val id = deletePlaylistId
+                    dialog = "playlists"
+                    if (id != null) operate { PlayerHolder.deletePlaylist(context, id); notice = "已删除播放列表" }
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) } },
+                dismissButton = { TextButton(onClick = { dialog = "playlists" }) { Text("取消") } })
+        }
+        "mode" -> PlaybackModeDialog(onClose = { dialog = null })
         "timer" -> TimerDialog(onClose = { dialog = null })
-        "playlists", "playlistEdit", "playlistPick" -> AlertDialog(onDismissRequest = { dialog = null }, title = { Text("播放列表") },
-            text = { Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+        "addToPlaylist" -> AlertDialog(onDismissRequest = { dialog = null; target = null }, containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp, title = { Text("加入播放列表", fontSize = 20.sp, fontWeight = FontWeight.SemiBold) },
+            text = { Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                NewMusicPlaylist(onClick = { target = null; editText = ""; dialog = "newPlaylist" })
+                playlists.forEach { list ->
+                    val entries by playlistRepo.items(list.id).collectAsState(initial = emptyList())
+                    MusicPlaylistCard(name = list.name, count = entries.size, current = list.id == currentPlaylistId, onOpen = {
+                    val item = target
+                    operate {
+                        val tracks = when (item) {
+                            is LibraryTarget.Audio -> listOf(item.track)
+                            is LibraryTarget.Category -> categoryRepo.recursiveTracks(item.category.id)
+                            else -> return@operate
+                        }
+                        if (list.id == currentPlaylistId) queueItems(tracks, false)
+                        else {
+                            playlistRepo.addTracks(list.id, tracks.map { it.id })
+                            notice = "已加入${list.name}"
+                        }
+                    }
+                    dialog = null; target = null
+                }) }
+            } }, confirmButton = { AreaButton(onClick = { dialog = null; target = null }) { Text("取消") } })
+        "playlists", "playlistEdit", "playlistPick" -> AlertDialog(onDismissRequest = { dialog = null }, containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp, title = { Text(if (dialog == "playlists") "播放列表" else selectedListName, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            text = { Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (dialog == "playlists") {
-                    TextButton(onClick = { editText = ""; dialog = "newPlaylist" }) { Text("＋ 新建列表") }
-                    playlists.forEach { list -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { playlistId = list.id; dialog = "playlistEdit" }, modifier = Modifier.weight(1f)) { Text(list.name) }
-                        TextButton(onClick = { playlistId = list.id; editText = list.name; dialog = "renamePlaylist" }) { Text("改名") }
-                        TextButton(onClick = { operate { playlistRepo.delete(list.id) } }) { Text("删除") }
-                    } }
+                    NewMusicPlaylist(onClick = { editText = ""; dialog = "newPlaylist" })
+                    Text("共 ${playlists.size} 个列表", style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+                    playlists.forEach { list ->
+                        val entries by playlistRepo.items(list.id).collectAsState(initial = emptyList())
+                        MusicPlaylistCard(name = list.name, count = entries.size, current = list.id == currentPlaylistId,
+                            onOpen = { playlistId = list.id; dialog = "playlistEdit" },
+                            onRename = { playlistId = list.id; editText = list.name; dialog = "renamePlaylist" },
+                            onDelete = { deletePlaylistId = list.id; dialog = "deletePlaylist" })
+                    }
                 } else if (dialog == "playlistEdit") {
-                    TextButton(onClick = { selectedTracks = emptySet(); selectedCategories = emptySet(); dialog = "playlistPick" }) { Text("＋ 添加音频或类别") }
+                    AreaAction(onClick = { selectedTracks = emptySet(); selectedCategories = emptySet(); dialog = "playlistPick" }, modifier = Modifier.fillMaxWidth(), tone = ActionTone.CONFIRM) {
+                        Text("＋ 添加音频或类别")
+                        Spacer(Modifier.weight(1f))
+                        Text(selectedListName, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 100.dp))
+                    }
                     val entries by playlistRepo.items(playlistId ?: -1L).collectAsState(initial = emptyList())
-                    TextButton(onClick = { queueItems(entries.mapNotNull { entry -> libraryTracks.firstOrNull { it.id == entry.trackId } }, true); dialog = null }, enabled = entries.isNotEmpty()) { Text("播放此列表") }
-                    entries.forEach { entry -> val track = libraryTracks.firstOrNull { it.id == entry.trackId }; if (track != null) Text(track.title, Modifier.padding(8.dp)) }
+                    AreaAction(onClick = { queueItems(entries.mapNotNull { entry -> libraryTracks.firstOrNull { it.id == entry.trackId } }, true, playlistId); dialog = null }, enabled = entries.isNotEmpty()) { Text("播放此列表") }
+                    entries.forEach { entry -> val track = libraryTracks.firstOrNull { it.id == entry.trackId }; if (track != null) Text(track.title, Modifier.fillMaxWidth().regionFrame().padding(12.dp)) }
                 } else {
                     Row {
                         FilterChip(playlistPickMode == 0, { playlistPickMode = 0 }, { Text("按类别选择") })
@@ -259,26 +355,37 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
                         FilterChip(playlistPickMode == 1, { playlistPickMode = 1 }, { Text("按文件选择") })
                     }
                     if (playlistPickMode == 0) {
-                        allCategories.forEach { cat -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        allCategories.forEach { cat -> Row(Modifier.fillMaxWidth().regionFrame(cat.id in selectedCategories).padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = cat.id in selectedCategories, onCheckedChange = { selectedCategories = if (it) selectedCategories + cat.id else selectedCategories - cat.id })
                             Text(categoryPath(cat, allCategories))
                         } }
                     } else {
                         OutlinedTextField(playlistSearch, { playlistSearch = it }, label = { Text("搜索文件名") })
-                        libraryTracks.filter { it.title.contains(playlistSearch, ignoreCase = true) }.forEach { track -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        libraryTracks.filter { it.title.contains(playlistSearch, ignoreCase = true) }.forEach { track -> Row(Modifier.fillMaxWidth().regionFrame(track.id in selectedTracks).padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = track.id in selectedTracks, onCheckedChange = { selectedTracks = if (it) selectedTracks + track.id else selectedTracks - track.id })
                             Text(track.title)
                         } }
                     }
-                    Button(onClick = { val id = playlistId; operate { if (id != null) { playlistRepo.addTracks(id, selectedTracks.toList()); selectedCategories.forEach { playlistRepo.addCategory(id, it) } } }; dialog = "playlistEdit" }) { Text("加入列表") }
+                    Button(onClick = { val id = playlistId; operate {
+                        if (id != null) {
+                            val tracks = libraryTracks.filter { it.id in selectedTracks } +
+                                selectedCategories.flatMap { categoryRepo.recursiveTracks(it) }
+                            if (id == sourcePlaylistId) queueItems(tracks, false)
+                            else {
+                                playlistRepo.addTracks(id, tracks.map { it.id })
+                                notice = "已加入$selectedListName"
+                            }
+                            dialog = "playlistEdit"
+                        }
+                    } }, enabled = selectedTracks.isNotEmpty() || selectedCategories.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
+                        Text("加入列表")
+                        Spacer(Modifier.weight(1f))
+                        Text(selectedListName, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 110.dp))
+                    }
                 }
-            } }, confirmButton = { TextButton(onClick = { dialog = if (dialog == "playlists") null else "playlists" }) { Text(if (dialog == "playlists") "关闭" else "返回") } })
+            } }, confirmButton = { AreaButton(onClick = { dialog = if (dialog == "playlists") null else "playlists" }) { Text(if (dialog == "playlists") "关闭" else "返回") } })
     }
 }
-
-private fun parseDate(text: String): Long? = runCatching {
-    if (text.isBlank()) null else LocalDate.parse(text).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-}.getOrNull()
 
 private fun categoryPath(category: CategoryEntity, all: List<CategoryEntity>): String {
     val names = mutableListOf(category.name)
@@ -293,25 +400,54 @@ private fun categoryPath(category: CategoryEntity, all: List<CategoryEntity>): S
 
 @Composable
 private fun LibraryAudioRow(track: TrackEntity, onPlay: () -> Unit, onMore: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onPlay) { Icon(Icons.Default.PlayArrow, "播放音频") }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val queue by PlayerHolder.queue.collectAsState()
+    val index by PlayerHolder.currentIndex.collectAsState()
+    val playing by PlayerHolder.isPlaying.collectAsState()
+    val isCurrent = queue.getOrNull(index)?.track?.id == track.id
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).regionFrame(isCurrent).padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(8.dp)) {
             Text(track.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(track.uploader ?: track.platform, style = MaterialTheme.typography.bodySmall)
+            Text(if (track.addedAtMs > 0) displayDateTime(track.addedAtMs, seconds = true) else "时间未记录",
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        IconButton(onClick = { if (isCurrent) scope.launch { PlayerHolder.toggle(context) } else onPlay() }) {
+            Icon(if (isCurrent && playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (isCurrent && playing) "暂停音频" else "播放音频", tint = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
         }
         IconButton(onClick = onMore) { Icon(Icons.Default.MoreVert, "更多") }
     }
 }
 
 @Composable
-private fun TimerDialog(onClose: () -> Unit) {
+internal fun TimerDialog(onClose: () -> Unit) {
     val context = LocalContext.current
+    val status = timerStatus()
     var minutes by remember { mutableStateOf("15") }
     var finish by remember { mutableStateOf(true) }
-    AlertDialog(onDismissRequest = onClose, title = { Text("定时播放") }, text = { Column {
-        Row(Modifier.horizontalScroll(rememberScrollState())) { listOf(15L, 30L, 60L).forEach { value -> TextButton(onClick = { minutes = value.toString() }) { Text(if (value == 60L) "1小时" else "${value}分钟") } } }
+    AlertDialog(onDismissRequest = onClose, title = { Text("定时播放") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        status?.let { Text("当前定时：$it", style = MaterialTheme.typography.titleSmall) }
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf(15L, 30L, 60L).forEach { value -> AreaButton(onClick = { minutes = value.toString() }, tone = ActionTone.TIMER) { Text(if (value == 60L) "1小时" else "${value}分钟") } } }
         OutlinedTextField(minutes, { minutes = it.filter(Char::isDigit) }, label = { Text("自定义分钟") })
-        Row(verticalAlignment = Alignment.CenterVertically) { Switch(checked = finish, onCheckedChange = { finish = it }); Text("播完再停") }
-        TextButton(onClick = { PlayerHolder.cancelTimer(); onClose() }) { Text("取消定时") }
-    } }, confirmButton = { TextButton(onClick = { val duration = minutes.toLongOrNull(); if (duration != null && duration > 0) { PlayerHolder.setTimer(context, duration, finish); onClose() } }) { Text("开始计时") } }, dismissButton = { TextButton(onClick = onClose) { Text("关闭") } })
+        Row(verticalAlignment = Alignment.CenterVertically) { Switch(checked = finish, onCheckedChange = { finish = it }); Text("播完整个音频再停") }
+        Text(if (finish) "计时结束后，播放完当前音频再停止。" else "计时结束后立即停止播放。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (status != null) AreaButton(onClick = { PlayerHolder.cancelTimer(); onClose() }, modifier = Modifier.fillMaxWidth(), tone = ActionTone.TIMER) { Text("取消定时播放") }
+    } }, confirmButton = { AreaButton(onClick = { val duration = minutes.toLongOrNull(); if (duration != null && duration in 1..1440) { PlayerHolder.setTimer(context, duration, finish); onClose() } }, tone = ActionTone.TIMER) { Text("开始计时") } }, dismissButton = { AreaButton(onClick = onClose) { Text("关闭") } })
+}
+
+@Composable
+private fun NameEditor(initialName: String, onNameChange: (String) -> Unit) {
+    var value by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(
+        initialName, androidx.compose.ui.text.TextRange(0, initialName.length)
+    )) }
+    val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    OutlinedTextField(
+        value = value,
+        onValueChange = { value = it; onNameChange(it.text) },
+        label = { Text("名称") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+    )
 }

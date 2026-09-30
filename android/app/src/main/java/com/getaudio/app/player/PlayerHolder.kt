@@ -8,6 +8,11 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.getaudio.app.data.local.TrackEntity
+import com.getaudio.app.data.repo.PlaylistRepository
+import com.getaudio.app.data.repo.TrackRepository
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.io.File
 import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,13 +32,18 @@ import kotlin.coroutines.resume
  */
 object PlayerHolder {
 
-    enum class Mode(val label: String) {
-        LOOP("列表循环"), SINGLE("单次播放"), ORDERED("顺序列表"), SHUFFLE("列表随机")
+    enum class Mode(val label: String, val description: String) {
+        LOOP("列表循环", "按列表顺序播放，结束后从头继续"),
+        SINGLE("单曲循环", "重复播放当前音频"),
+        ORDERED("顺序播放", "按列表顺序播放，最后一首结束后停止"),
+        SHUFFLE("随机播放", "随机播放列表中的音频")
     }
 
     data class QueueItem(val track: TrackEntity, val path: String)
     private val queueState = MutableStateFlow<List<QueueItem>>(emptyList())
     val queue = queueState.asStateFlow()
+    private val sourcePlaylistIdState = MutableStateFlow<Long?>(null)
+    val sourcePlaylistId = sourcePlaylistIdState.asStateFlow()
     private val indexState = MutableStateFlow(0)
     val currentIndex = indexState.asStateFlow()
     private val playingState = MutableStateFlow(false)
@@ -42,9 +52,11 @@ object PlayerHolder {
     val mode = modeState.asStateFlow()
     private val timerDeadlineState = MutableStateFlow<Long?>(null)
     val timerDeadline = timerDeadlineState.asStateFlow()
-    private var stopAfterCurrent = false
+    private val waitingForTrackEndState = MutableStateFlow(false)
+    val waitingForTrackEnd = waitingForTrackEndState.asStateFlow()
     private val timerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var timerJob: Job? = null
+    private val appendMutex = Mutex()
 
     @Volatile
     private var controller: MediaController? = null
@@ -60,19 +72,22 @@ object PlayerHolder {
 
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     val previousIndex = indexState.value
-                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO &&
-                        (stopAfterCurrent || modeState.value == Mode.SINGLE)) {
+                    if (waitingForTrackEndState.value &&
+                        (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                            reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)) {
+                        waitingForTrackEndState.value = false
                         connected.pause()
                         if (previousIndex in queueState.value.indices) connected.seekTo(previousIndex, 0)
-                        stopAfterCurrent = false
+                        timerScope.launch { applyMode(context) }
                     }
                     indexState.value = connected.currentMediaItemIndex.coerceAtLeast(0)
                 }
 
                 override fun onPlaybackStateChanged(state: Int) {
-                    if (state == Player.STATE_ENDED && stopAfterCurrent) {
+                    if (state == Player.STATE_ENDED && waitingForTrackEndState.value) {
                         connected.pause()
-                        stopAfterCurrent = false
+                        waitingForTrackEndState.value = false
+                        timerScope.launch { applyMode(context) }
                     }
                 }
             })
@@ -103,27 +118,73 @@ object PlayerHolder {
             .setArtist(item.track.uploader ?: item.track.platform).build())
         .build()
 
-    suspend fun playAll(context: Context, items: List<QueueItem>) {
-        if (items.isEmpty()) return
-        queueState.value = items
+    suspend fun playAll(context: Context, items: List<QueueItem>, playlistId: Long? = null) = appendMutex.withLock {
+        val existingIds = TrackRepository(context).allNow().map { it.id }.toSet()
+        val ids = newQueueTracks(emptyList(), items.map { it.track }).map { it.id }.toSet()
+        val unique = items.distinctBy { it.track.id }.filter { it.track.id in ids && it.track.id in existingIds }
+        if (unique.isEmpty()) return@withLock
+        val lists = PlaylistRepository(context)
+        val sourceId = playlistId ?: lists.ensureDefault()
+        if (playlistId == null) lists.replaceTracks(sourceId, unique.map { it.track.id })
+        sourcePlaylistIdState.value = sourceId
+        queueState.value = unique
         indexState.value = 0
         get(context).run {
-            setMediaItems(items.map(::mediaItem))
+            setMediaItems(unique.map(::mediaItem))
             prepare()
             play()
         }
         applyMode(context)
     }
 
-    suspend fun append(context: Context, items: List<QueueItem>) {
-        if (items.isEmpty()) return
-        val wasEmpty = queueState.value.isEmpty()
-        queueState.value = queueState.value + items
-        get(context).run {
-            addMediaItems(items.map(::mediaItem))
-            if (wasEmpty) prepare() // 加入当前列表时保持暂停
+    suspend fun append(context: Context, items: List<QueueItem>): Int = appendMutex.withLock {
+        appendLocked(context, items)
+    }
+
+    private suspend fun appendLocked(context: Context, items: List<QueueItem>): Int {
+        if (items.isEmpty()) return 0
+        val player = get(context)
+        val lists = PlaylistRepository(context)
+        val sourceId = lists.resolve(sourcePlaylistIdState.value)
+        if (queueState.value.isEmpty()) {
+            val saved = lists.tracks(sourceId).map { track ->
+                val path = track.localPath?.takeIf { File(it).exists() }
+                    ?: TrackRepository(context).download(track).getOrThrow().absolutePath
+                QueueItem(track, path)
+            }
+            val restoredIds = newQueueTracks(emptyList(), saved.map { it.track }).map { it.id }.toSet()
+            val restored = saved.filter { it.track.id in restoredIds }.distinctBy { it.track.id }
+            queueState.value = restored
+            sourcePlaylistIdState.value = sourceId
+            indexState.value = 0
+            player.setMediaItems(restored.map(::mediaItem))
+            if (restored.isNotEmpty()) player.prepare()
         }
-        if (wasEmpty) indexState.value = 0
+        val acceptedIds = newQueueTracks(queueState.value.map { it.track }, items.map { it.track }).map { it.id }.toSet()
+        val additions = items.distinctBy { it.track.id }.filter { it.track.id in acceptedIds }
+        if (additions.isEmpty()) return 0
+        lists.addTracks(sourceId, additions.map { it.track.id })
+        // Recheck after database suspension so rapid repeated taps cannot enqueue duplicates.
+        val finalIds = newQueueTracks(queueState.value.map { it.track }, additions.map { it.track }).map { it.id }.toSet()
+        val finalItems = additions.filter { it.track.id in finalIds }
+        if (finalItems.isEmpty()) return 0
+        val wasEmpty = queueState.value.isEmpty()
+        sourcePlaylistIdState.value = sourceId
+        queueState.value = queueState.value + finalItems
+        player.addMediaItems(finalItems.map(::mediaItem))
+        if (wasEmpty) { player.prepare(); indexState.value = 0 }
+        return finalItems.size
+    }
+
+    /** Play a library selection inside the current list, keeping all its existing entries. */
+    suspend fun playSelection(context: Context, items: List<QueueItem>) {
+        if (items.isEmpty()) return
+        append(context, items)
+        val selected = items.first().track
+        val position = queueState.value.indexOfFirst { item ->
+            newQueueTracks(listOf(item.track), listOf(selected)).isEmpty()
+        }
+        if (position >= 0) jump(context, position)
     }
 
     suspend fun jump(context: Context, index: Int) {
@@ -134,9 +195,65 @@ object PlayerHolder {
 
     suspend fun remove(context: Context, index: Int) {
         if (index !in queueState.value.indices) return
+        val removed = queueState.value[index]
+        sourcePlaylistIdState.value?.let { PlaylistRepository(context).removeTrack(it, removed.track.id) }
         get(context).removeMediaItem(index)
         queueState.value = queueState.value.toMutableList().also { it.removeAt(index) }
         indexState.value = get(context).currentMediaItemIndex.coerceAtLeast(0)
+    }
+
+    /** Deleting a saved list removes references, never library audio files. */
+    suspend fun deletePlaylist(context: Context, id: Long) = appendMutex.withLock {
+        val lists = PlaylistRepository(context)
+        val current = lists.resolve(sourcePlaylistIdState.value)
+        lists.delete(id)
+        if (current == id) {
+            get(context).run { stop(); clearMediaItems() }
+            queueState.value = emptyList()
+            indexState.value = 0
+            playingState.value = false
+            sourcePlaylistIdState.value = lists.ensureDefault()
+            cancelTimer()
+        }
+    }
+
+    /** Library deletion removes every occurrence without restarting surviving audio. */
+    suspend fun removeTracks(context: Context, deletedIds: Set<Long>) = appendMutex.withLock {
+        val remaining = queueState.value.toMutableList()
+        val indices = queueRemovalIndices(remaining.map { it.track.id }, deletedIds)
+        if (indices.isEmpty()) return@withLock
+        val player = get(context)
+        indices.forEach { index ->
+            player.removeMediaItem(index)
+            remaining.removeAt(index)
+        }
+        queueState.value = remaining
+        indexState.value = player.currentMediaItemIndex.coerceAtLeast(0)
+        if (remaining.isEmpty()) {
+            player.pause()
+            playingState.value = false
+            indexState.value = 0
+            cancelTimer()
+        }
+    }
+
+    /** 更新队列及系统媒体信息；仅替换元数据，保留音源和播放进度。 */
+    suspend fun rename(context: Context, id: Long, title: String) {
+        val oldQueue = queueState.value
+        if (oldQueue.none { it.track.id == id }) return
+        val updated = oldQueue.map { item ->
+            if (item.track.id == id) item.copy(track = item.track.copy(title = title)) else item
+        }
+        val player = get(context)
+        updated.forEachIndexed { index, item ->
+            if (item.track.id == id && index < player.mediaItemCount) {
+                val original = player.getMediaItemAt(index)
+                player.replaceMediaItem(index, original.buildUpon().setMediaMetadata(
+                    original.mediaMetadata.buildUpon().setTitle(title).build()
+                ).build())
+            }
+        }
+        queueState.value = updated
     }
 
     suspend fun toggle(context: Context) {
@@ -151,11 +268,7 @@ object PlayerHolder {
     private suspend fun applyMode(context: Context) {
         get(context).run {
             shuffleModeEnabled = modeState.value == Mode.SHUFFLE
-            repeatMode = when (modeState.value) {
-                Mode.LOOP -> Player.REPEAT_MODE_ALL
-                Mode.SINGLE -> Player.REPEAT_MODE_OFF
-                else -> Player.REPEAT_MODE_OFF
-            }
+            repeatMode = playbackRepeatMode(modeState.value, waitingForTrackEndState.value)
         }
     }
 
@@ -163,13 +276,16 @@ object PlayerHolder {
         timerJob?.cancel()
         val deadline = android.os.SystemClock.elapsedRealtime() + minutes * 60_000L
         timerDeadlineState.value = deadline
-        stopAfterCurrent = false
+        waitingForTrackEndState.value = false
         timerJob = timerScope.launch {
+            applyMode(context)
             delay(minutes * 60_000L)
             if (timerDeadlineState.value == deadline) {
                 timerDeadlineState.value = null
-                if (finishTrack && get(context).isPlaying) stopAfterCurrent = true
-                else get(context).pause()
+                if (finishTrack && get(context).isPlaying) {
+                    waitingForTrackEndState.value = true
+                    applyMode(context)
+                } else get(context).pause()
             }
         }
     }
@@ -177,7 +293,8 @@ object PlayerHolder {
     fun cancelTimer() {
         timerJob?.cancel()
         timerDeadlineState.value = null
-        stopAfterCurrent = false
+        waitingForTrackEndState.value = false
+        controller?.let { it.repeatMode = playbackRepeatMode(modeState.value, false) }
     }
 
     fun release() {

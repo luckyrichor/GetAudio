@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface CategoryDao {
-    @Query("SELECT * FROM categories ORDER BY name")
+    @Query("SELECT * FROM categories WHERE id != 1 ORDER BY name")
     fun observeAll(): Flow<List<CategoryEntity>>
 
     @Query("SELECT * FROM categories ORDER BY name")
@@ -20,10 +20,10 @@ interface CategoryDao {
     @Query("SELECT * FROM categories WHERE parentId = :parentId ORDER BY name")
     fun children(parentId: Long): Flow<List<CategoryEntity>>
 
-    @Query("SELECT * FROM categories WHERE parentId IS NULL ORDER BY name")
+    @Query("SELECT * FROM categories WHERE id != 1 AND parentId IS NULL ORDER BY name")
     fun roots(): Flow<List<CategoryEntity>>
 
-    @Query("SELECT * FROM categories ORDER BY accessCount DESC, lastAccessedAt DESC LIMIT 5")
+    @Query("SELECT * FROM categories WHERE id != 1 ORDER BY accessCount DESC, lastAccessedAt DESC LIMIT 5")
     fun frequent(): Flow<List<CategoryEntity>>
 
     @Insert

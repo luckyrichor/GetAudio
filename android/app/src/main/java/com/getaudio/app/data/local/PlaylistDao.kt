@@ -14,6 +14,24 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlists WHERE id = :id")
     suspend fun byId(id: Long): PlaylistEntity?
 
+    @Query("SELECT id FROM playlists WHERE isDefault = 1 LIMIT 1")
+    suspend fun firstId(): Long?
+
+    @Query("SELECT id FROM playlists ORDER BY createdAt, id LIMIT 1")
+    suspend fun oldestId(): Long?
+
+    @Query("UPDATE playlists SET isDefault = CASE WHEN id = :id THEN 1 ELSE 0 END")
+    suspend fun markDefault(id: Long)
+
+    @Query("SELECT * FROM playlist_items WHERE playlistId = :id ORDER BY orderIndex")
+    suspend fun itemsNow(id: Long): List<PlaylistItemEntity>
+
+    @Query("DELETE FROM playlist_items WHERE playlistId = :id AND trackId = :trackId")
+    suspend fun removeItem(id: Long, trackId: Long)
+
+    @Query("SELECT name FROM playlists")
+    suspend fun names(): List<String>
+
     @Insert
     suspend fun insert(playlist: PlaylistEntity): Long
 

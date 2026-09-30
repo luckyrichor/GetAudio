@@ -1,5 +1,9 @@
 package com.getaudio.app.data.repo
 
+import android.content.Context
+import java.io.File
+import org.json.JSONObject
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import com.getaudio.app.data.remote.ApiError
 import com.getaudio.app.data.remote.GetAudioApi
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -23,8 +27,31 @@ object ApiProvider {
         coerceInputValues = true
     }
 
+    @Volatile private var serverAuthorization: String? = null
+    private val credentialOrigin = TX_SERVER_URL.toHttpUrl()
+
+    /** Provisioned privately on the device, never bundled in the APK or diagnostics. */
+    fun initialize(context: Context) {
+        serverAuthorization = runCatching {
+            val file = File(context.filesDir, "server-access.json")
+            if (!file.exists()) null else JSONObject(file.readText()).getString("authorization")
+                .takeIf { it.startsWith("Basic ") && !it.contains('\n') && !it.contains('\r') }
+        }.getOrNull()
+    }
+
     private val client = OkHttpClient.Builder()
         // 提取是同步阻塞的，服务器那边要下载加转码，给足时间
+        .addNetworkInterceptor { chain ->
+            val request = chain.request()
+            val builder = request.newBuilder()
+            // Evaluate every hop, including redirects and audio downloads.
+            if (isCredentialOrigin(request.url, credentialOrigin)) {
+                serverAuthorization?.let { builder.header("Authorization", it) }
+            } else {
+                builder.removeHeader("Authorization")
+            }
+            chain.proceed(builder.build())
+        }
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(180, TimeUnit.SECONDS)
         .build()
@@ -55,7 +82,7 @@ object ApiProvider {
             }.getOrNull()
             when (t.code()) {
                 400 -> body ?: "链接解析失败"
-                401 -> body ?: "需要先登录该平台"
+                401 -> body ?: "服务器访问未授权，请检查访问配置"
                 404 -> body ?: "没找到"
                 501 -> body ?: "该平台暂不支持这种登录方式"
                 502 -> body ?: "平台侧提取失败，稍后再试"
@@ -63,7 +90,9 @@ object ApiProvider {
             }
         }
         is java.net.SocketTimeoutException -> "请求超时，请检查网络或稍后重试"
-        is java.net.ConnectException -> "连接失败，请检查网络"
+        is java.net.ConnectException -> if (t.message.orEmpty().contains("127.0.0.1"))
+            "tx 调试通道未连接，请连接 Mac 并恢复 USB 转发，或在服务器设置中填写手机可访问的地址"
+        else "无法连接服务器，请检查服务器地址和服务状态"
         else -> t.message ?: "未知错误"
     }
 }

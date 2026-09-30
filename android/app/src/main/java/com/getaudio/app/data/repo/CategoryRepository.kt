@@ -6,8 +6,12 @@ import com.getaudio.app.data.local.AppDatabase
 import com.getaudio.app.data.local.CategoryEntity
 import com.getaudio.app.data.local.TrackEntity
 import java.io.File
+import com.getaudio.app.player.PlayerHolder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
-class CategoryRepository(context: Context) {
+class CategoryRepository(private val context: Context) {
     private val db = AppDatabase.get(context)
     private val categories = db.categoryDao()
     private val tracks = db.trackDao()
@@ -68,11 +72,13 @@ class CategoryRepository(context: Context) {
     suspend fun delete(id: Long): Int {
         require(id != 1L) { "不能删除系统类别" }
         val files = mutableListOf<File>()
+        val deletedIds = mutableSetOf<Long>()
         val count = db.withTransaction {
             val all = categories.allNow()
             require(all.any { it.id == id }) { "类别不存在" }
             val ids = descendants(id, all)
             val affected = tracks.allNow().filter { it.localCategoryId in ids }
+            deletedIds.addAll(affected.map { it.id })
             affected.forEach { track ->
                 if (track.id > 0) tracks.suppress(track.id)
                 playlists.removeTrack(track.id)
@@ -83,6 +89,7 @@ class CategoryRepository(context: Context) {
             ids.reversed().forEach { categories.delete(it) }
             affected.size
         }
+        withContext(NonCancellable + Dispatchers.Main) { PlayerHolder.removeTracks(context, deletedIds) }
         files.forEach(File::delete)
         return count
     }

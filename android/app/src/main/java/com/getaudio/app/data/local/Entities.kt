@@ -35,6 +35,7 @@ data class TrackEntity(
     @ColumnInfo(defaultValue = "0") val updatedAtMs: Long = 0,
     /** 本机重命名后保留显示名，云端同步不覆盖。 */
     val localTitleOverride: String? = null,
+    @ColumnInfo(defaultValue = "0") val addedAtMs: Long = 0,
 )
 
 @Entity(tableName = "categories")
@@ -54,6 +55,7 @@ data class PlaylistEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
     val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0") val isDefault: Boolean = false,
 )
 
 @Entity(tableName = "playlist_items", primaryKeys = ["playlistId", "trackId"])

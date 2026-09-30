@@ -14,11 +14,14 @@ private val Context.dataStore by preferencesDataStore("settings")
 /** 可选同步服务器地址和用户 id；手机直接提取不需要服务器。 */
 class Settings(private val context: Context) {
 
+    // The production server is reachable directly from the phone.
+    companion object { const val DEFAULT_SERVER_URL = TX_SERVER_URL }
+
     private val serverKey = stringPreferencesKey("server_url")
     private val userKey = stringPreferencesKey("user_id")
 
     val serverUrl: Flow<String> = context.dataStore.data.map {
-        it[serverKey] ?: ""
+        effectiveServerUrl(it[serverKey])
     }
 
     suspend fun setServerUrl(url: String) {

@@ -129,7 +129,7 @@ fun LoginScreen() {
         )
 
         if (vm.credentials.isNotEmpty()) {
-            Card {
+            OutlinedCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("已有凭证", style = MaterialTheme.typography.titleSmall)
                     vm.credentials.forEach { c ->
@@ -139,7 +139,7 @@ fun LoginScreen() {
                                 Modifier.weight(1f),
                                 style = MaterialTheme.typography.bodyMedium,
                             )
-                            TextButton(onClick = { vm.revoke(c.platform) }) { Text("删除") }
+                            AreaButton(onClick = { vm.revoke(c.platform) }, tone = ActionTone.DESTRUCTIVE) { Text("删除") }
                         }
                     }
                 }
@@ -152,7 +152,7 @@ fun LoginScreen() {
         }
 
         vm.qrImageUrl?.let { url ->
-            Card {
+            OutlinedCard {
                 Column(
                     Modifier.fillMaxWidth().padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -167,7 +167,7 @@ fun LoginScreen() {
         vm.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 
         if (vm.showImport) {
-            Card {
+            OutlinedCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("导入浏览器 Cookie", style = MaterialTheme.typography.titleSmall)
                     Text(

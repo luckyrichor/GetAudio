@@ -10,10 +10,10 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface TrackDao {
 
-    @Query("SELECT * FROM tracks WHERE title LIKE '%' || :q || '%' AND (:startMs IS NULL OR updatedAtMs >= :startMs) AND (:endMs IS NULL OR updatedAtMs <= :endMs) ORDER BY updatedAtMs DESC, id DESC")
+    @Query("SELECT * FROM tracks WHERE title LIKE '%' || :q || '%' AND (:startMs IS NULL OR addedAtMs >= :startMs) AND (:endMs IS NULL OR addedAtMs <= :endMs) ORDER BY addedAtMs DESC, id DESC")
     fun allWithTimeRange(q: String, startMs: Long?, endMs: Long?): Flow<List<TrackEntity>>
 
-    @Query("SELECT * FROM tracks WHERE localCategoryId = :categoryId ORDER BY updatedAtMs DESC, id DESC")
+    @Query("SELECT * FROM tracks WHERE localCategoryId = :categoryId ORDER BY addedAtMs DESC, id DESC")
     fun inCategory(categoryId: Long): Flow<List<TrackEntity>>
 
     @Query("SELECT * FROM tracks")
@@ -30,6 +30,16 @@ interface TrackDao {
 
     @Query("INSERT OR IGNORE INTO deleted_tracks (id) VALUES (:id)")
     suspend fun suppress(id: Long)
+
+    @Query("DELETE FROM deleted_tracks WHERE id = :id")
+    suspend fun unsuppress(id: Long)
+
+    /** Explicit extraction is a user request to restore a previously removed cloud track. */
+    @Transaction
+    suspend fun restoreExtracted(track: TrackEntity) {
+        unsuppress(track.id)
+        applySync(listOf(track), emptyList())
+    }
 
     @Query("SELECT id FROM deleted_tracks")
     suspend fun suppressedIds(): List<Long>
@@ -61,6 +71,9 @@ interface TrackDao {
     @Query("DELETE FROM tracks WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<Long>)
 
+    @Query("DELETE FROM playlist_items WHERE trackId IN (:ids)")
+    suspend fun removePlaylistReferences(ids: List<Long>)
+
     @Query("UPDATE tracks SET localPath = :path WHERE id = :id")
     suspend fun setLocalPath(id: Long, path: String?)
 
@@ -75,13 +88,17 @@ interface TrackDao {
      */
     @Transaction
     suspend fun applySync(incoming: List<TrackEntity>, deletedIds: List<Long>) {
-        if (deletedIds.isNotEmpty()) deleteByIds(deletedIds)
+        if (deletedIds.isNotEmpty()) {
+            removePlaylistReferences(deletedIds)
+            deleteByIds(deletedIds)
+        }
         if (incoming.isEmpty()) return
         val suppressed = suppressedIds().toSet()
         val merged = incoming.filter { it.id !in suppressed }.map { fresh ->
             val existing = byId(fresh.id)
-            if (existing == null) fresh
+            if (existing == null) fresh.copy(addedAtMs = System.currentTimeMillis())
             else fresh.copy(
+                addedAtMs = existing.addedAtMs.takeIf { it > 0 } ?: System.currentTimeMillis(),
                 localPath = existing.localPath.takeIf { existing.audioSha256 == fresh.audioSha256 },
                 favorite = existing.favorite,
                 localCategoryId = existing.localCategoryId,
@@ -103,6 +120,7 @@ interface TrackDao {
             localCategoryId = existing?.localCategoryId ?: track.localCategoryId,
             title = existing?.localTitleOverride ?: track.title,
             localTitleOverride = existing?.localTitleOverride,
+            addedAtMs = existing?.addedAtMs?.takeIf { it > 0 } ?: System.currentTimeMillis(),
             updatedAtMs = System.currentTimeMillis())))
     }
 }

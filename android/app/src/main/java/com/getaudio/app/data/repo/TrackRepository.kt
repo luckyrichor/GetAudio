@@ -1,6 +1,8 @@
 package com.getaudio.app.data.repo
 
 import android.content.Context
+import androidx.room.withTransaction
+import com.getaudio.app.player.PlayerHolder
 import com.getaudio.app.data.local.AppDatabase
 import com.getaudio.app.data.local.SyncStateEntity
 import com.getaudio.app.data.local.TrackEntity
@@ -8,6 +10,7 @@ import com.getaudio.app.data.remote.TrackDto
 import com.getaudio.app.data.remote.ExtractRequest
 import com.getaudio.app.data.localextract.DirectExtractor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
@@ -49,15 +52,21 @@ class TrackRepository(private val context: Context) {
     suspend fun rename(id: Long, title: String) {
         require(title.isNotBlank()) { "音频名称不能为空" }
         trackDao.rename(id, title.trim(), System.currentTimeMillis())
+        withContext(Dispatchers.Main) {
+            com.getaudio.app.player.PlayerHolder.rename(context, id, title.trim())
+        }
     }
 
     suspend fun remove(id: Long) {
         val track = trackDao.byId(id) ?: return
         fileMutex.withLock {
-            if (id > 0) trackDao.suppress(id)
-            db.playlistDao().removeTrack(id)
-            trackDao.delete(id)
+            db.withTransaction {
+                if (id > 0) trackDao.suppress(id)
+                db.playlistDao().removeTrack(id)
+                trackDao.delete(id)
+            }
         }
+        withContext(NonCancellable + Dispatchers.Main) { PlayerHolder.removeTracks(context, setOf(id)) }
         track.localPath?.let { File(it).delete() }
     }
 
@@ -82,14 +91,14 @@ class TrackRepository(private val context: Context) {
         text: String, onDiagnostic: (String) -> Unit = {},
     ): Result<TrackEntity> = runCatching {
         val base = settings.serverUrlNow()
-        require(base.isNotBlank()) { "请先到「我的 → 关于 → 开发者选项」填写服务器地址" }
+        require(base.isNotBlank()) { "请先到「我的 → 服务器设置」填写服务器地址" }
         onDiagnostic("服务器提取：已提交，等待处理")
         val response = ApiProvider.api(base).extract(
             ExtractRequest(text = text, userId = settings.userId()),
         )
         val entity = response.track.toEntity()
         onDiagnostic("服务器提取：成功，开始下载音频到手机")
-        fileMutex.withLock { trackDao.applySync(listOf(entity), emptyList()) }
+        fileMutex.withLock { trackDao.restoreExtracted(entity) }
         download(entity).getOrThrow()
         onDiagnostic("服务器音频：下载完成，已加入本地音频库")
         trackDao.byId(entity.id) ?: entity
@@ -98,30 +107,40 @@ class TrackRepository(private val context: Context) {
     // ---------- 同步 ----------
 
     /** 增量拉取，返回本次新增/更新的条数。 */
-    suspend fun sync(): Int = withContext(Dispatchers.IO) { fileMutex.withLock {
-        val serverUrl = settings.serverUrlNow()
-        if (serverUrl.isBlank()) return@withLock 0
-        val api = ApiProvider.api(serverUrl)
-        var cursor = syncDao.cursor()
-        var total = 0
+    suspend fun sync(): Int = withContext(Dispatchers.IO) {
+        val deletedIds = mutableSetOf<Long>()
+        try {
+            fileMutex.withLock {
+                val serverUrl = settings.serverUrlNow()
+                if (serverUrl.isBlank()) return@withLock 0
+                val api = ApiProvider.api(serverUrl)
+                var cursor = syncDao.cursor()
+                var total = 0
 
-        // has_more 时继续拉，直到追平
-        while (true) {
-            val page = api.sync(cursor = cursor)
-            if (page.items.isEmpty()) break
+                // has_more 时继续拉，直到追平
+                while (true) {
+                    val page = api.sync(cursor = cursor)
+                    if (page.items.isEmpty()) break
 
-            val (deleted, alive) = page.items.partition { it.deleted }
-            trackDao.applySync(alive.map { it.toEntity() }, deleted.map { it.id })
-            // 服务器删了就把本地文件也删掉，不然白占空间
-            deleted.forEach { localFile(it.id).delete() }
+                    val (deleted, alive) = page.items.partition { it.deleted }
+                    trackDao.applySync(alive.map { it.toEntity() }, deleted.map { it.id })
+                    deletedIds.addAll(deleted.map { it.id })
 
-            total += page.items.size
-            cursor = page.nextCursor
-            syncDao.put(SyncStateEntity(cursor = cursor, lastSyncAt = System.currentTimeMillis()))
-            if (!page.hasMore) break
+                    total += page.items.size
+                    cursor = page.nextCursor
+                    syncDao.put(SyncStateEntity(cursor = cursor, lastSyncAt = System.currentTimeMillis()))
+                    if (!page.hasMore) break
+                }
+                total
+            }
+        } finally {
+            // Release the download mutex before waiting for a queue operation.
+            if (deletedIds.isNotEmpty()) {
+                withContext(NonCancellable + Dispatchers.Main) { PlayerHolder.removeTracks(context, deletedIds) }
+                deletedIds.forEach { localFile(it).delete() }
+            }
         }
-        total
-    } }
+    }
 
     // ---------- 下载 ----------
 

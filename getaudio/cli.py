@@ -216,6 +216,13 @@ def cmd_classify(args) -> int:
     return 0
 
 
+def cmd_repair_audio_sizes(args) -> int:
+    from .audio_integrity import repair_legacy_audio_sizes
+    init_db()
+    print(f"已修复 {len(repair_legacy_audio_sizes())} 条音频大小记录")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -257,6 +264,9 @@ def main(argv: list[str] | None = None) -> int:
     pc.add_argument("--limit", type=int, default=100)
     pc.add_argument("--force", action="store_true")
     pc.set_defaults(func=cmd_classify)
+
+    prep = sub.add_parser("repair-audio-sizes", help="按已验证哈希修复历史音频大小，并推进同步游标")
+    prep.set_defaults(func=cmd_repair_audio_sizes)
 
     plog = sub.add_parser("login", help="扫码登录（终端里直接显示二维码）")
     plog.add_argument("--user", required=True, help="用户 id")

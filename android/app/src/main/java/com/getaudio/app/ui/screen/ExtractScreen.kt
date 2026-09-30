@@ -4,6 +4,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.os.SystemClock
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -17,7 +19,6 @@ import com.getaudio.app.data.local.TrackEntity
 import com.getaudio.app.data.repo.ApiProvider
 import com.getaudio.app.data.repo.TrackRepository
 import com.getaudio.app.data.repo.DiagnosticsStore
-import com.getaudio.app.data.repo.Settings
 import com.getaudio.app.ui.formatDuration
 import kotlinx.coroutines.launch
 
@@ -110,8 +111,6 @@ fun ExtractScreen(prefill: String? = null, onSharedConsumed: () -> Unit = {}) {
     val context = LocalContext.current
     val vm: ExtractViewModel = viewModel(factory = ExtractViewModel.Factory(context))
     val snackbar = remember { SnackbarHostState() }
-    var pasteDialog by remember { mutableStateOf(false) }
-    val serverUrl by remember(context) { Settings(context).serverUrl }.collectAsState(initial = "")
 
     LaunchedEffect(prefill) {
         if (!prefill.isNullOrBlank()) {
@@ -128,16 +127,26 @@ fun ExtractScreen(prefill: String? = null, onSharedConsumed: () -> Unit = {}) {
     }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("提取音频", style = MaterialTheme.typography.titleLarge)
-            Button(onClick = { if (vm.input.isBlank()) vm.pasteFromClipboard(context); if (vm.input.isBlank()) pasteDialog = true else vm.submit() }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth()) {
-                Text(if (vm.busy && !vm.usingServer) "提取中…" else "本地提取")
+        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("提取音频", style = MaterialTheme.typography.headlineSmall)
+            Text("粘贴视频链接或完整分享文本，保存你想听的声音。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedTextField(
+                value = vm.input, onValueChange = { vm.input = it }, enabled = !vm.busy,
+                label = { Text("分享文本或链接") },
+                placeholder = { Text("在这里粘贴抖音、哔哩哔哩的分享内容") },
+                minLines = 5, maxLines = 8, modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                TextButton(onClick = { vm.pasteFromClipboard(context) }, enabled = !vm.busy) { Text("粘贴剪贴板") }
+                TextButton(onClick = { vm.input = "" }, enabled = !vm.busy && vm.input.isNotBlank()) { Text("清空") }
             }
-            OutlinedButton(onClick = { vm.pasteFromClipboard(context); pasteDialog = true }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth()) { Text("粘贴文本") }
-            OutlinedButton(onClick = { if (vm.input.isBlank()) vm.pasteFromClipboard(context); if (vm.input.isBlank()) pasteDialog = true else vm.submitViaServer() }, enabled = !vm.busy && serverUrl.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
-                Text(if (vm.busy && vm.usingServer) "提取中…" else "服务器提取")
+            Button(onClick = { vm.submit() }, enabled = !vm.busy && vm.input.isNotBlank(), modifier = Modifier.fillMaxWidth().height(52.dp), shape = MaterialTheme.shapes.large) {
+                Text(if (vm.busy && !vm.usingServer) "正在提取…" else "提取音频")
             }
-            if (serverUrl.isBlank()) Text("未配置服务器，可在「我的 → 关于 → 开发者选项」设置", style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = { vm.submitViaServer() }, enabled = !vm.busy && vm.input.isNotBlank(), modifier = Modifier.fillMaxWidth().height(48.dp), shape = MaterialTheme.shapes.large) {
+                Text(if (vm.busy && vm.usingServer) "服务器提取中…" else "从服务器提取")
+            }
             if (vm.busy) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
                 Text(if (vm.usingServer) "服务器正在提取并下载到手机" else "手机正在解析并下载音频", style = MaterialTheme.typography.bodySmall)
@@ -145,10 +154,4 @@ fun ExtractScreen(prefill: String? = null, onSharedConsumed: () -> Unit = {}) {
             ExtractionDiagnostics()
         }
     }
-    if (pasteDialog) AlertDialog(onDismissRequest = { pasteDialog = false }, title = { Text("粘贴分享文本") },
-        text = { OutlinedTextField(vm.input, { vm.input = it }, label = { Text("分享文本或链接") }, minLines = 3, modifier = Modifier.fillMaxWidth()) },
-        confirmButton = { Row {
-            TextButton(onClick = { pasteDialog = false; vm.submit() }, enabled = vm.input.isNotBlank()) { Text("本地提取") }
-            TextButton(onClick = { pasteDialog = false; vm.submitViaServer() }, enabled = vm.input.isNotBlank() && serverUrl.isNotBlank()) { Text("服务器提取") }
-        } }, dismissButton = { TextButton(onClick = { pasteDialog = false }) { Text("取消") } })
 }

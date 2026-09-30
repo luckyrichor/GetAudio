@@ -10,7 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [TrackEntity::class, SyncStateEntity::class, CategoryEntity::class,
         PlaylistEntity::class, PlaylistItemEntity::class, DeletedTrackEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -54,6 +54,15 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tracks ADD COLUMN addedAtMs INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE playlists ADD COLUMN isDefault INTEGER NOT NULL DEFAULT 0")
+                // Legacy records only have these timestamps; never manufacture a historical date.
+                db.execSQL("UPDATE tracks SET addedAtMs = CASE WHEN id < 0 AND updatedSeq > 1000000000000 THEN updatedSeq ELSE updatedAtMs END")
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -69,7 +78,7 @@ abstract class AppDatabase : RoomDatabase() {
                         db.execSQL("INSERT OR IGNORE INTO categories (id,name,parentId,kind,createdAt,accessCount,lastAccessedAt) VALUES (1,'未分类',NULL,'LEAF',0,0,0)")
                     }
                 })
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
                 .also { instance = it }
         }

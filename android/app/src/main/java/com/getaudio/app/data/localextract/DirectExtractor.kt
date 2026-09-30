@@ -304,6 +304,9 @@ class DirectExtractor(
                 "手机暂不支持抽取此视频的音频编码"
             }
             extractor.selectTrack(audio)
+            require(extractor.sampleTime >= 0) { "音轨没有可读取的数据" }
+            // 创建封装器前检查首帧，避免 stop() 的空文件错误覆盖明确的失败原因。
+            muxerSampleFlags(extractor.sampleFlags)
             val muxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             var started = false
             try {
@@ -316,7 +319,7 @@ class DirectExtractor(
                     buffer.clear()
                     val size = extractor.readSampleData(buffer, 0)
                     if (size < 0) break
-                    info.set(0, size, extractor.sampleTime, extractor.sampleFlags)
+                    info.set(0, size, extractor.sampleTime, muxerSampleFlags(extractor.sampleFlags))
                     muxer.writeSampleData(outTrack, buffer, info)
                     extractor.advance()
                 }
