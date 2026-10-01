@@ -7,7 +7,7 @@ import re
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -34,10 +34,12 @@ def update_memory(session: Session, user_id: str, memory_id: int, revision: int,
     item = session.get(AgentMemory, memory_id)
     if item is None or item.user_id != user_id or item.deleted:
         return None
-    if item.revision != revision:
+    changed = session.execute(update(AgentMemory).where(AgentMemory.id == memory_id,
+        AgentMemory.user_id == user_id, AgentMemory.deleted == 0, AgentMemory.revision == revision)
+        .values(content=content.strip(), revision=revision + 1)).rowcount
+    if not changed:
         raise ValueError("偏好已更新，请刷新后再修改")
-    item.content = content.strip()
-    item.revision += 1
+    session.refresh(item)
     session.add(AgentMemoryVersion(memory_id=item.id, revision=item.revision, action="update", content=item.content))
     return item
 
@@ -46,9 +48,13 @@ def delete_memory(session: Session, user_id: str, memory_id: int) -> bool:
     item = session.get(AgentMemory, memory_id)
     if item is None or item.user_id != user_id or item.deleted:
         return False
-    item.deleted = 1
-    item.revision += 1
-    session.add(AgentMemoryVersion(memory_id=item.id, revision=item.revision, action="delete", content=None))
+    revision = item.revision
+    changed = session.execute(update(AgentMemory).where(AgentMemory.id == memory_id,
+        AgentMemory.user_id == user_id, AgentMemory.deleted == 0, AgentMemory.revision == revision)
+        .values(deleted=1, revision=revision + 1)).rowcount
+    if not changed:
+        return False
+    session.add(AgentMemoryVersion(memory_id=item.id, revision=revision + 1, action="delete", content=None))
     return True
 
 

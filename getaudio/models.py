@@ -174,3 +174,47 @@ class AgentMemoryVersion(Base):
     action: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AppUser(Base):
+    __tablename__ = "app_users"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    phone: Mapped[str] = mapped_column(String(16), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AppSession(Base):
+    __tablename__ = "app_sessions"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("app_users.id"), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AgentConversation(Base):
+    __tablename__ = "agent_conversations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("app_users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AgentEvent(Base):
+    __tablename__ = "agent_events"
+    __table_args__ = (UniqueConstraint("conversation_id", "request_id", "role"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("agent_conversations.id"), index=True)
+    request_id: Mapped[str] = mapped_column(String(36))
+    role: Mapped[str] = mapped_column(String(16))
+    payload_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AgentAction(Base):
+    __tablename__ = "agent_actions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("agent_conversations.id"), index=True)
+    input_url: Mapped[str] = mapped_column(String(2048))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    mode: Mapped[str | None] = mapped_column(String(16))
+    result_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

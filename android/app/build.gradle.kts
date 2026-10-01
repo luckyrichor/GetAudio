@@ -13,8 +13,8 @@ android {
         applicationId = "com.getaudio.app"
         minSdk = 26          // Media3 和后台播放在 8.0 以下坑太多
         targetSdk = 34
-        versionCode = 12
-        versionName = "0.4.2"
+        versionCode = 13
+        versionName = "0.5.0"
         manifestPlaceholders["appLabel"] = "@string/app_name"
 
     }
@@ -41,6 +41,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.11"

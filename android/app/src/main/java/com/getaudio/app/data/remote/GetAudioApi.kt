@@ -9,6 +9,17 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 
 interface GetAudioApi {
+    @POST("account/register") suspend fun accountRegister(@Body body: AccountCredentials): AccountSession
+    @POST("account/login") suspend fun accountLogin(@Body body: AccountCredentials): AccountSession
+    @GET("account/me") suspend fun accountMe(): AccountIdentity
+    @POST("account/logout") suspend fun accountLogout(): Map<String, Boolean>
+    @POST("agent/v2/chat") suspend fun extractionAgent(@Body body: ExtractionAgentRequest): ExtractionAgentResponse
+    @GET("agent/v2/conversations") suspend fun agentConversations(): List<AgentConversationDto>
+    @GET("agent/v2/conversations/{id}") suspend fun agentHistory(@Path("id") id: String): AgentHistoryDto
+    @DELETE("agent/v2/conversations/{id}") suspend fun agentClear(@Path("id") id: String): Map<String, Boolean>
+    @POST("agent/v2/actions/{id}/claim") suspend fun agentClaim(@Path("id") id: String, @Body body: AgentClaim): AgentActionDto
+    @POST("agent/v2/actions/{id}/result") suspend fun agentResult(@Path("id") id: String, @Body body: AgentToolResult): AgentActionDto
+
 
     @POST("agent/chat")
     suspend fun agentChat(@Body body: AgentChatRequest): AgentChatResponse

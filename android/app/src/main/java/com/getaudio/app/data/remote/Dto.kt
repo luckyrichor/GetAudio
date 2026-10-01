@@ -129,3 +129,33 @@ data class AgentMemoryOut(
     val content: String,
     val revision: Int,
 )
+
+@Serializable
+data class AccountCredentials(val phone: String, val password: String)
+@Serializable
+data class AccountIdentity(@SerialName("user_id") val userId: String, val phone: String)
+@Serializable
+data class AccountSession(@SerialName("user_id") val userId: String, val phone: String,
+    @SerialName("session_token") val sessionToken: String, @SerialName("expires_at") val expiresAt: String)
+@Serializable
+data class ExtractionAgentRequest(@SerialName("request_id") val requestId: String,
+    @SerialName("conversation_id") val conversationId: String? = null, val message: String,
+    @SerialName("local_tracks") val localTracks: List<AgentLocalTrack> = emptyList())
+@Serializable
+data class ExtractionAgentResponse(@SerialName("conversation_id") val conversationId: String,
+    val answer: String, @SerialName("track_ids") val trackIds: List<Long> = emptyList(), val model: String? = null,
+    @SerialName("memory_proposal") val memoryProposal: String? = null, val action: AgentActionDto? = null)
+@Serializable
+data class AgentActionDto(val id: String, @SerialName("input_url") val inputUrl: String,
+    val status: String, val mode: String? = null, val result: AgentToolResult? = null)
+@Serializable
+data class AgentClaim(val mode: String)
+@Serializable
+data class AgentToolResult(val success: Boolean, @SerialName("track_id") val trackId: Long? = null,
+    val title: String? = null, val diagnostic: String = "", val source: String? = null, val mode: String? = null)
+@Serializable
+data class AgentConversationDto(val id: String, @SerialName("created_at") val createdAt: String)
+@Serializable
+data class AgentEventDto(val role: String, val payload: kotlinx.serialization.json.JsonObject)
+@Serializable
+data class AgentHistoryDto(val events: List<AgentEventDto>, val actions: List<AgentActionDto>)

@@ -14,12 +14,14 @@ from datetime import timezone
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, JSONResponse
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import agent, credentials, login
+from . import accounts, extraction_agent
 from .config import settings
 from .db import SessionLocal, init_db
 from .extractors import ExtractorError, NeedsLoginError
@@ -37,7 +39,17 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="GetAudio", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="GetAudio", version="0.5.0", lifespan=lifespan,
+              dependencies=[Depends(accounts.protect_account_ids)])
+app.include_router(accounts.router)
+app.include_router(extraction_agent.router)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(_, exc: RequestValidationError):
+    # FastAPI's default error includes raw input (e.g. a too-short password).
+    return JSONResponse(status_code=422, content={"detail": [
+        {"loc": list(e["loc"]), "msg": e["msg"], "type": e["type"]} for e in exc.errors()]})
 
 
 def get_session():
@@ -208,6 +220,7 @@ def api_agent_memories(user_id: str, session: Session = Depends(get_session)) ->
 
 @app.post("/agent/memories", response_model=AgentMemoryOut)
 def api_agent_memory_create(req: AgentMemoryRequest, session: Session = Depends(get_session)) -> AgentMemoryOut:
+    extraction_agent.safe_text(req.content)
     if not req.content.strip():
         raise HTTPException(400, "偏好不能为空")
     if len(api_agent_memories(req.user_id, session)) >= 50:
@@ -221,6 +234,7 @@ def api_agent_memory_create(req: AgentMemoryRequest, session: Session = Depends(
 @app.put("/agent/memories/{user_id}/{memory_id}", response_model=AgentMemoryOut)
 def api_agent_memory_update(user_id: str, memory_id: int, req: AgentMemoryUpdate,
                             session: Session = Depends(get_session)) -> AgentMemoryOut:
+    extraction_agent.safe_text(req.content)
     if not req.content.strip():
         raise HTTPException(400, "偏好不能为空")
     try:

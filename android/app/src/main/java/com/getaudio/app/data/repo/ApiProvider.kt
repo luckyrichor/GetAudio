@@ -32,6 +32,7 @@ object ApiProvider {
 
     /** Provisioned privately on the device, never bundled in the APK or diagnostics. */
     fun initialize(context: Context) {
+        AccountStore.initialize(context)
         serverAuthorization = runCatching {
             val file = File(context.filesDir, "server-access.json")
             if (!file.exists()) null else JSONObject(file.readText()).getString("authorization")
@@ -50,6 +51,8 @@ object ApiProvider {
             } else {
                 builder.removeHeader("Authorization")
             }
+            builder.removeHeader("X-GetAudio-Session")
+            AccountStore.sessionFor(request.url)?.let { builder.header("X-GetAudio-Session", it) }
             chain.proceed(builder.build())
         }
         .connectTimeout(15, TimeUnit.SECONDS)

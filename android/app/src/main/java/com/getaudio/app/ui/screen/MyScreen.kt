@@ -25,6 +25,8 @@ fun MyScreen(onCategories: () -> Unit) {
     val scope = rememberCoroutineScope()
     val tracks by AppDatabase.get(context).trackDao().observeAll().collectAsState(initial = emptyList())
     var dialog by remember { mutableStateOf<String?>(null) }
+    var showAccount by remember { mutableStateOf(false) }
+    val account by com.getaudio.app.data.repo.AccountStore.current.collectAsState()
     var showLogin by remember { mutableStateOf(false) }
     var showAgent by remember { mutableStateOf(false) }
     var serverUrl by remember { mutableStateOf(Settings.DEFAULT_SERVER_URL) }
@@ -39,6 +41,13 @@ fun MyScreen(onCategories: () -> Unit) {
         }
     }
     val bytes = tracks.sumOf { it.localPath?.let { path -> File(path).takeIf(File::exists)?.length() } ?: 0L }
+    if (showAccount) {
+        Column {
+            AreaButton(onClick = { showAccount = false }) { Text("‹ 返回") }
+            AccountScreen()
+        }
+        return
+    }
     if (showLogin) {
         Column {
             AreaButton(onClick = { showLogin = false }) { Text("‹ 返回") }
@@ -55,12 +64,13 @@ fun MyScreen(onCategories: () -> Unit) {
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("我的", style = MaterialTheme.typography.headlineSmall)
-        Row(Modifier.fillMaxWidth().regionFrame().clickable { showLogin = true }.padding(16.dp)) {
+        Row(Modifier.fillMaxWidth().regionFrame().clickable { showAccount = true }.padding(16.dp)) {
             Icon(Icons.Default.AccountCircle, null, Modifier.size(52.dp)); Spacer(Modifier.width(12.dp))
-            Column { Text("访客", style = MaterialTheme.typography.titleMedium); Text("点击登录", style = MaterialTheme.typography.bodySmall) }
+            Column { Text(account?.maskedPhone ?: "访客", style = MaterialTheme.typography.titleMedium); Text(if (account == null) "点击登录账号" else "账号管理", style = MaterialTheme.typography.bodySmall) }
         }
 
         AreaAction(onClick = { scope.launch { serverUrl = Settings(context).serverUrlNow(); serverError = null; serverCheck = null; dialog = "server" } }) { Text("服务器设置") }
+        AreaAction(onClick = { showLogin = true }) { Text("抖音 / B站平台登录") }
         AreaAction(onClick = onCategories) { Text("类别管理") }
         AreaAction(onClick = { dialog = "storage" }) { Text("存储空间：${bytes / 1024 / 1024} MB") }
         AreaAction(onClick = { dialog = "feedback" }) { Text("意见反馈") }

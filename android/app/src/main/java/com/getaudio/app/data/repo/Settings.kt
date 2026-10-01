@@ -33,6 +33,7 @@ class Settings(private val context: Context) {
     suspend fun serverUrlNow(): String = serverUrl.first()
 
     suspend fun userId(): String {
+        AccountStore.forServer(serverUrlNow())?.let { return it.userId }
         val existing = context.dataStore.data.map { it[userKey] }.first()
         if (existing != null) return existing
         val fresh = UUID.randomUUID().toString()

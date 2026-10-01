@@ -35,3 +35,7 @@
 先前自动审批拒绝安装，用户一度暂缓；2026-09-30 用户明确授权按此方案实施，后续安装、HTTPS及续期配置执行成功。控制台登录由用户完成。
 
 参考：[Let's Encrypt IP certificates and Certbot](https://letsencrypt.org/2026/03/11/shorter-certs-certbot)。
+
+## 0.5.0 账号入口
+
+2026-10-02 新增手机号/密码与 Agent 会话鉴权，应用令牌通过 `X-GetAudio-Session` 传递；原 nginx Basic 设备访问配置继续使用。nginx 显式覆盖 `X-Forwarded-For` 为 `$remote_addr`，配合 Uvicorn 对回环代理的默认信任，使登录限流使用真实客户端来源，避免客户端自填来源地址。配置验证通过后 reload，业务 API 在数据库备份后重启加载新表。
