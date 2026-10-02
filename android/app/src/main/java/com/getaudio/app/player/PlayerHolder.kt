@@ -256,6 +256,20 @@ object PlayerHolder {
         queueState.value = updated
     }
 
+    suspend fun edited(context: Context, track: TrackEntity) = appendMutex.withLock {
+        val old = queueState.value
+        if (old.none { it.track.id == track.id }) return@withLock
+        val player = get(context)
+        val current = player.currentMediaItemIndex
+        val updated = old.map { if (it.track.id == track.id) QueueItem(track, track.localPath!!) else it }
+        if (old.getOrNull(current)?.track?.id == track.id) player.pause()
+        updated.forEachIndexed { index, item ->
+            if (item.track.id == track.id) player.replaceMediaItem(index, mediaItem(item))
+        }
+        if (old.getOrNull(current)?.track?.id == track.id) player.seekTo(current, 0)
+        queueState.value = updated
+    }
+
     suspend fun toggle(context: Context) {
         get(context).run { if (isPlaying) pause() else play() }
     }

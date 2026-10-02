@@ -89,26 +89,15 @@ interface TrackDao {
     @Transaction
     suspend fun applySync(incoming: List<TrackEntity>, deletedIds: List<Long>) {
         if (deletedIds.isNotEmpty()) {
-            removePlaylistReferences(deletedIds)
-            deleteByIds(deletedIds)
+            val removable = deletedIds.filter { byId(it)?.locallyEdited != true }
+            removePlaylistReferences(removable)
+            deleteByIds(removable)
         }
         if (incoming.isEmpty()) return
         val suppressed = suppressedIds().toSet()
         val merged = incoming.filter { it.id !in suppressed }.map { fresh ->
             val existing = byId(fresh.id)
-            if (existing == null) fresh.copy(addedAtMs = System.currentTimeMillis())
-            else fresh.copy(
-                addedAtMs = existing.addedAtMs.takeIf { it > 0 } ?: System.currentTimeMillis(),
-                localPath = existing.localPath.takeIf { existing.audioSha256 == fresh.audioSha256 },
-                favorite = existing.favorite,
-                localCategoryId = existing.localCategoryId,
-                title = existing.localTitleOverride ?: fresh.title,
-                localTitleOverride = existing.localTitleOverride,
-                updatedAtMs = if (existing.localTitleOverride != null)
-                    maxOf(existing.updatedAtMs, fresh.updatedAtMs)
-                else if (existing.updatedSeq == fresh.updatedSeq && existing.updatedAtMs > 0)
-                    existing.updatedAtMs else fresh.updatedAtMs,
-            )
+            mergeServerTrack(fresh, existing, System.currentTimeMillis())
         }
         upsertAll(merged)
     }

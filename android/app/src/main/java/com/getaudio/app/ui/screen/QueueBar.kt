@@ -37,6 +37,7 @@ fun QueueBar() {
     if (queue.isNotEmpty()) {
         Column {
             HorizontalDivider()
+            key(queue.getOrNull(index)?.track?.id) { PlaybackProgress(queue.getOrNull(index)?.track?.id ?: queue.first().track.id) }
             Row(Modifier.fillMaxWidth().height(72.dp).padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f).padding(end = 8.dp)) {
                     Text(queue.getOrNull(index)?.track?.title ?: queue.first().track.title,

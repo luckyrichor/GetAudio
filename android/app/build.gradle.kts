@@ -13,8 +13,8 @@ android {
         applicationId = "com.getaudio.app"
         minSdk = 26          // Media3 和后台播放在 8.0 以下坑太多
         targetSdk = 34
-        versionCode = 13
-        versionName = "0.5.0"
+        versionCode = 14
+        versionName = "0.6.0"
         manifestPlaceholders["appLabel"] = "@string/app_name"
 
     }
@@ -82,6 +82,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-session:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
+    implementation("androidx.media3:media3-transformer:1.3.1")
 
     // 后台同步
     implementation("androidx.work:work-runtime-ktx:2.9.0")

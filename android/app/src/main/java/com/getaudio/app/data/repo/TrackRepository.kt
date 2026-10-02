@@ -124,7 +124,7 @@ class TrackRepository(private val context: Context) {
 
                     val (deleted, alive) = page.items.partition { it.deleted }
                     trackDao.applySync(alive.map { it.toEntity() }, deleted.map { it.id })
-                    deletedIds.addAll(deleted.map { it.id })
+                    deletedIds.addAll(deleted.map { it.id }.filter { trackDao.byId(it) == null })
 
                     total += page.items.size
                     cursor = page.nextCursor
@@ -150,15 +150,16 @@ class TrackRepository(private val context: Context) {
     suspend fun download(track: TrackEntity): Result<File> = runCatching {
         withContext(Dispatchers.IO) { fileMutex.withLock {
             val current = trackDao.byId(track.id) ?: error("音频已被移除，请重新同步")
-            val dest = localFile(track.id)
+            val dest = current.localPath?.let(::File) ?: localFile(track.id)
             if (current.localPath == dest.absolutePath && dest.exists() && dest.length() > 0) {
                 if (track.localPath == null) trackDao.setLocalPath(track.id, dest.absolutePath)
                 return@withLock dest
             }
+            if (current.locallyEdited) error("本地剪辑文件已丢失，请恢复原版或重新剪辑")
             if (track.id < 0) error("本机音频文件已丢失，请重新提取")
 
             val base = settings.serverUrlNow().trimEnd('/')
-            val url = base + track.downloadUrl
+            val url = base + current.downloadUrl
             val request = Request.Builder().url(url).build()
 
             // 先写临时文件，完整了再改名 —— 中断的下载不会留下半个能播的文件
@@ -190,6 +191,102 @@ class TrackRepository(private val context: Context) {
             trackDao.setLocalPath(track.id, dest.absolutePath)
             dest
         } }
+    }
+
+    /** A stable snapshot prevents background server downloads from changing an open edit. */
+    suspend fun editSource(id: Long): File = withContext(Dispatchers.IO) {
+        val track = trackDao.byId(id) ?: error("音频已被删除")
+        download(track).getOrThrow()
+        fileMutex.withLock {
+            val current = trackDao.byId(id) ?: error("音频已被删除")
+            val source = current.localPath?.let(::File)?.takeIf { it.exists() } ?: error("音频已更新，请重新打开剪辑")
+            val snapshot = File.createTempFile("edit-source-", ".audio", context.cacheDir)
+            try { source.copyTo(snapshot, overwrite = true); snapshot }
+            catch (e: Exception) { snapshot.delete(); throw e }
+        }
+    }
+
+    /** Commit a complete export under a unique path before touching the library record. */
+    suspend fun saveEdit(id: Long, output: File, title: String, overwrite: Boolean): TrackEntity = withContext(Dispatchers.IO) {
+        require(title.isNotBlank()) { "名称不能为空" }
+        withContext(NonCancellable) {
+            var previousPath: String? = null
+            val saved = fileMutex.withLock {
+                val original = trackDao.byId(id) ?: error("音频已被删除")
+                val newId = if (overwrite) id else generateSequence { -java.util.concurrent.ThreadLocalRandom.current().nextLong(1, Long.MAX_VALUE) }
+                    .first { trackDao.byId(it) == null }
+                val target = File(audioDir, "$newId-edit-${java.util.UUID.randomUUID()}.m4a")
+                val duration = com.getaudio.app.audioedit.AudioEditor.duration(output)
+                require(duration > 0 && output.length() > 0) { "剪辑结果无效" }
+                val digest = MessageDigest.getInstance("SHA-256")
+                output.inputStream().use { input -> val buffer = ByteArray(65536); while (true) {
+                    val count = input.read(buffer); if (count < 0) break; digest.update(buffer, 0, count)
+                } }
+                val hash = digest.digest().joinToString("") { "%02x".format(it) }
+                try { output.copyTo(target) } catch (e: Exception) { target.delete(); throw e }
+                if (overwrite) previousPath = original.localPath
+                val now = System.currentTimeMillis()
+                val record = original.copy(id = newId, title = title.trim(), localTitleOverride = title.trim(),
+                    videoId = if (overwrite) original.videoId else "edit-${java.util.UUID.randomUUID()}",
+                    localPath = target.absolutePath, locallyEdited = true,
+                    sourceTrackId = original.sourceTrackId ?: original.id,
+                    durationSec = duration / 1000.0, audioBytes = target.length(), audioFormat = "m4a", audioSha256 = hash,
+                    downloadUrl = if (overwrite) original.downloadUrl else "",
+                    updatedAtMs = now, addedAtMs = if (overwrite) original.addedAtMs else now,
+                    updatedSeq = if (overwrite) original.updatedSeq else now,
+                    favorite = if (overwrite) original.favorite else false)
+                try { trackDao.upsertAll(listOf(record)) } catch (e: Exception) { target.delete(); throw e }
+                record
+            }
+            withContext(Dispatchers.Main) { PlayerHolder.edited(context, saved) }
+            previousPath?.takeIf { it != saved.localPath }?.let { File(it).delete() }
+            saved
+        }
+    }
+
+    /** Explicitly restore the latest server file; never download over an edited file implicitly. */
+    suspend fun restoreOriginal(id: Long): TrackEntity = withContext(Dispatchers.IO) {
+        require(id > 0) { "此音频没有可恢复的服务器原版" }
+        val api = ApiProvider.api(settings.serverUrlNow())
+        var cursor = 0L
+        var original: TrackEntity? = null
+        while (original == null) {
+            val page = api.sync(cursor)
+            original = page.items.firstOrNull { it.id == id && !it.deleted }?.toEntity()
+            if (!page.hasMore || page.items.isEmpty()) break
+            check(page.nextCursor > cursor) { "同步游标无效" }
+            cursor = page.nextCursor
+        }
+        val fresh = original ?: error("服务器原版已不存在")
+        val staged = File.createTempFile("restore-", ".audio", audioDir)
+        try {
+            ApiProvider.okHttp().newCall(Request.Builder().url(settings.serverUrlNow().trimEnd('/') + fresh.downloadUrl).build()).execute().use { response ->
+                check(response.isSuccessful) { "恢复失败：HTTP ${response.code}" }
+                val body = response.body ?: error("响应为空")
+                staged.outputStream().use { out -> body.byteStream().copyTo(out) }
+            }
+            val digest = MessageDigest.getInstance("SHA-256")
+            staged.inputStream().use { input -> val buffer = ByteArray(65536); while (true) {
+                val count = input.read(buffer); if (count < 0) break; digest.update(buffer, 0, count)
+            } }
+            val hash = digest.digest().joinToString("") { "%02x".format(it) }
+            check(staged.length() > 0 && (fresh.audioBytes == null || staged.length() == fresh.audioBytes) &&
+                (fresh.audioSha256 == null || hash == fresh.audioSha256)) { "原版下载不完整，请重试" }
+            withContext(NonCancellable) {
+                var previousPath: String? = null
+                val saved = fileMutex.withLock {
+                    val current = trackDao.byId(id) ?: error("音频已被删除")
+                    previousPath = current.localPath
+                    val record = fresh.copy(localPath = staged.absolutePath, favorite = current.favorite,
+                        localCategoryId = current.localCategoryId, addedAtMs = current.addedAtMs,
+                        title = current.localTitleOverride ?: fresh.title, localTitleOverride = current.localTitleOverride)
+                    trackDao.upsertAll(listOf(record)); record
+                }
+                withContext(Dispatchers.Main) { PlayerHolder.edited(context, saved) }
+                previousPath?.takeIf { it != saved.localPath }?.let { File(it).delete() }
+                saved
+            }
+        } catch (e: Exception) { if (trackDao.byId(id)?.localPath != staged.absolutePath) staged.delete(); throw e }
     }
 
     /** 批量补齐未下载的音频，返回成功条数。给 WorkManager 用。 */

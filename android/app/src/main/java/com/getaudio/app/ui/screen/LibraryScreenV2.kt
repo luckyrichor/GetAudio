@@ -69,6 +69,8 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
     var startMs by remember { mutableStateOf<Long?>(null) }
     var endTimeMs by remember { mutableStateOf<Long?>(null) }
     var dateDialog by remember { mutableStateOf(false) }
+    var editTrack by remember { mutableStateOf<TrackEntity?>(null) }
+    var restoreTrack by remember { mutableStateOf<TrackEntity?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var syncing by remember { mutableStateOf(false) }
     val serverUrl by remember(context) { Settings(context).serverUrl }.collectAsState(initial = "")
@@ -227,6 +229,9 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
         }
     }
 
+    editTrack?.let { track -> AudioEditScreen(track, onClose = { editTrack = null }, onSaved = { editTrack = null; notice = "剪辑已保存" }) }
+    restoreTrack?.let { track -> AlertDialog(onDismissRequest = { restoreTrack = null }, title = { Text("恢复服务器原版？") }, text = { Text("本地剪辑版将替换为服务器原版，收藏与播放列表保留。") }, confirmButton = { TextButton(onClick = { restoreTrack = null; operate { trackRepo.restoreOriginal(track.id); notice = "已恢复原版" } }) { Text("恢复") } }, dismissButton = { TextButton(onClick = { restoreTrack = null }) { Text("取消") } }) }
+
     if (dateDialog) DateTimeRangeDialog(startMs, endTimeMs, onClose = { dateDialog = false }, onApply = { from, until ->
         startMs = from; endTimeMs = until; dateDialog = false
     })
@@ -250,6 +255,10 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
                     MusicMenuAction("重命名", Icons.Default.Edit, onClick = { editText = if (item is LibraryTarget.Audio) item.track.title else (item as LibraryTarget.Category).category.name; dialog = "rename" })
                     MusicMenuAction("移动到…", Icons.AutoMirrored.Filled.DriveFileMove, onClick = { selectedParent = null; dialog = "move" })
                     MusicMenuAction("删除", Icons.Default.DeleteOutline, destructive = true, onClick = { dialog = "delete" })
+                }
+                if (item is LibraryTarget.Audio) {
+                    MusicMenuAction("剪辑音频", Icons.Default.ContentCut, status = if (item.track.locallyEdited) "本地剪辑版" else null, onClick = { editTrack = item.track; target = null })
+                    if (item.track.locallyEdited && item.track.id > 0) MusicMenuAction("恢复服务器原版", Icons.Default.Restore, onClick = { restoreTrack = item.track; target = null })
                 }
                 if (item is LibraryTarget.Audio) MusicMenuAction("导出", Icons.Default.IosShare, onClick = { exportTrack = item.track; target = null; exportLauncher.launch("${item.track.title.take(60)}.${item.track.audioFormat}") })
                 if (item is LibraryTarget.Category && item.category.kind != "LEAF") MusicMenuAction("新建子类别", Icons.Default.CreateNewFolder, onClick = { selectedParent = item.category.id; editText = ""; target = null; dialog = "newCategory" })

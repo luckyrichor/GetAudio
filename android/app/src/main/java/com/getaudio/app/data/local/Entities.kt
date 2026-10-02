@@ -7,8 +7,7 @@ import androidx.room.ColumnInfo
 /**
  * 本地音频库。
  *
- * 服务器是单向权威：除了 [localPath] 和 [favorite] 这两个纯本地状态，
- * 其余字段每次同步都会被服务器覆盖。
+ * 本地状态与剪辑版本在服务器同步时保留。
  */
 @Entity(tableName = "tracks")
 data class TrackEntity(
@@ -30,6 +29,8 @@ data class TrackEntity(
 
     /** 本地文件路径；null 表示还没下载 */
     val localPath: String? = null,
+    @ColumnInfo(defaultValue = "0") val locallyEdited: Boolean = false,
+    val sourceTrackId: Long? = null,
     val favorite: Boolean = false,
     @ColumnInfo(defaultValue = "1") val localCategoryId: Long = 1,
     @ColumnInfo(defaultValue = "0") val updatedAtMs: Long = 0,
