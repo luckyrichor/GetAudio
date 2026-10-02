@@ -1,6 +1,6 @@
 # Android 播放进度与本地波形剪辑
 
-开发日期：2026-10-02。基于 GetAudio `00a1a0b`，实现版本为包含本文的 0.6.0 功能提交（实际提交链接见飞书同步记录），Android 开发版本 0.6.0 / versionCode 14；服务端接口不变。这是实现说明，不代表已安装到手机或已完成真机验收。
+开发日期：2026-10-02。基于 GetAudio `00a1a0b`，实现版本为 `148161f` 的 0.6.0 功能提交，Android 开发版本 0.6.0 / versionCode 14；服务端接口不变。这是实现说明，不代表已安装到手机或已完成真机验收。
 
 ## 使用
 
@@ -42,3 +42,5 @@ JVM 回归覆盖片段排序/拼接时长、重叠及越界拒绝、时间解析
 7. 取消退出、应用切后台、低存储及中断导出，检查未保存修改不替换原文件。
 
 本轮验证：Android `testDebugUnitTest` 38 项通过，`assembleDebug` 成功；Python 138 项通过。APK 签名校验成功，包名 `com.getaudio.app`，版本 0.6.0 / code 14。用 SQLite 临时数据库核对生成的旧 v4 表结构经 v4→v5→v6 SQL 升级后与 Room 生成的 v6 完整表结构一致，并检查 v5→v6 保留已有记录及默认值；这不替代设备上的 Room 升级验收。当前未连接 Android 设备或模拟器，尚未执行真实波形、编解码及交互验收。
+
+飞书同步文档：[GetAudio 0.6.0：播放进度与波形剪辑](https://kcn0pbn0hwo0.feishu.cn/wiki/GhHuwjHeXiuMI6kT4iscQXxrnSe)，归档于知识库 `GetAudio / GetAudio 0.6.0：播放进度与波形剪辑`。实现与验证对应 [148161f](https://github.com/luckyrichor/GetAudio/commit/148161f)，后续归档链接更新不改变功能代码。
