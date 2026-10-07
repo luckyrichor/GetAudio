@@ -43,3 +43,5 @@ Android 版本0.8.0/code19。Python回归161项通过，涵盖未绑定拒绝注
 Android debug APK构建通过，49项JVM测试通过，Lint 0错误、22警告、1提示。真实B站扫码/风控、手机浏览器往返，以及配置后抖音真实授权仍需本人设备验收。新表可兼容旧代码回退；不要恢复旧数据库覆盖发布后的新账号数据。部署先备份当前SQLite和Nginx配置，再更新Nginx并重启API。
 
 公网部署验证：HTTPS平台能力查询200、未登录绑定/绑定列表401、无效OAuth状态400、历史路径和伪造账号路径仍Basic401；真实B站二维码申请和图片获取均200，随后取消。未扫描或绑定本人账号。抖音当前配置缺失，能力available=false。数据库完整性与外键检查通过，服务已重启，Nginx配置验证并重载；保留现网额外的mihomo-mobile include。备份目录 `/home/ubuntu/backups/getaudio-pre-080-20261007T130008Z`。Uvicorn回调日志实测无查询参数。
+
+实现来源：[GetAudio@7e2ae1e](https://github.com/luckyrichor/GetAudio/commit/7e2ae1e)。飞书归档：GetAudio / [GetAudio 0.8.0：手机号主账号与平台绑定登录](https://kcn0pbn0hwo0.feishu.cn/wiki/GDJVwJgVhiE77rkGX7EcqJ7anZd)，父节点及正文署名已回查。
