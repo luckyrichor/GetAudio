@@ -11,6 +11,7 @@ import com.getaudio.app.player.PlayerHolder
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlaybackProgress(trackId: Long) {
     val context = LocalContext.current
@@ -30,18 +31,17 @@ fun PlaybackProgress(trackId: Long) {
         }
     }
     LaunchedEffect(hintVersion) { if (hint != null) { delay(1200); hint = null } }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        Box(Modifier.fillMaxWidth().height(20.dp)) {
-            hint?.let { Text(it, Modifier.align(androidx.compose.ui.Alignment.Center), style = MaterialTheme.typography.labelSmall) }
-        }
+    Column(Modifier.fillMaxWidth()) {
+        CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
         Slider(value = fraction, onValueChange = { dragging = true; fraction = it }, enabled = duration > 0,
             onValueChangeFinished = {
                 val target = (fraction * duration).toLong().coerceIn(0, duration)
                 hint = playbackTime(target); hintVersion++
                 scope.launch { try { PlayerHolder.get(context).seekTo(target); position = target } finally { dragging = false } }
             }, modifier = Modifier.fillMaxWidth().height(28.dp))
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(playbackTime(position), style = MaterialTheme.typography.labelSmall)
+            Text(hint ?: playbackTime(position), style = MaterialTheme.typography.labelSmall)
             Text(playbackTime(duration), style = MaterialTheme.typography.labelSmall)
         }
     }

@@ -37,12 +37,13 @@ fun QueueBar() {
     if (queue.isNotEmpty()) {
         Column {
             HorizontalDivider()
-            key(queue.getOrNull(index)?.track?.id) { PlaybackProgress(queue.getOrNull(index)?.track?.id ?: queue.first().track.id) }
-            Row(Modifier.fillMaxWidth().height(72.dp).padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().height(88.dp).padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f).padding(end = 8.dp)) {
                     Text(queue.getOrNull(index)?.track?.title ?: queue.first().track.title,
                         style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-
+                    key(queue.getOrNull(index)?.track?.id) {
+                        PlaybackProgress(queue.getOrNull(index)?.track?.id ?: queue.first().track.id)
+                    }
                 }
                 Column(Modifier.width(64.dp).height(56.dp).clickable { showMode = true }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     Icon(playbackModeIcon(mode), mode.label, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)

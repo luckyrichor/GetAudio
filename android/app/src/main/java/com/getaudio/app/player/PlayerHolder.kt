@@ -134,7 +134,7 @@ object PlayerHolder {
         queueState.value = unique
         indexState.value = 0
         get(context).run {
-            setMediaItems(unique.map(::mediaItem))
+            setMediaItems(unique.map(::mediaItem), 0, 0L)
             prepare()
             play()
         }
@@ -161,8 +161,10 @@ object PlayerHolder {
             queueState.value = restored
             sourcePlaylistIdState.value = sourceId
             indexState.value = 0
-            player.setMediaItems(restored.map(::mediaItem))
-            if (restored.isNotEmpty()) player.prepare()
+            if (restored.isNotEmpty()) {
+                player.setMediaItems(restored.map(::mediaItem), 0, 0L)
+                player.prepare()
+            } else player.clearMediaItems()
         }
         val acceptedIds = newQueueTracks(queueState.value.map { it.track }, items.map { it.track }).map { it.id }.toSet()
         val additions = items.distinctBy { it.track.id }.filter { it.track.id in acceptedIds }
@@ -174,9 +176,14 @@ object PlayerHolder {
         if (finalItems.isEmpty()) return 0
         val wasEmpty = queueState.value.isEmpty()
         sourcePlaylistIdState.value = sourceId
+        if (wasEmpty) {
+            // Media3 1.3.1 addMediaItems after an empty timeline can retain INDEX_UNSET (-1).
+            // Explicitly start the first item at zero; append preserves an existing queue's position.
+            player.setMediaItems(finalItems.map(::mediaItem), 0, 0L)
+            player.prepare()
+            indexState.value = 0
+        } else player.addMediaItems(finalItems.map(::mediaItem))
         queueState.value = queueState.value + finalItems
-        player.addMediaItems(finalItems.map(::mediaItem))
-        if (wasEmpty) { player.prepare(); indexState.value = 0 }
         return finalItems.size
     }
 

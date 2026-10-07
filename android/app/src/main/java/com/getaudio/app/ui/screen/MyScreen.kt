@@ -1,5 +1,9 @@
 package com.getaudio.app.ui.screen
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -75,7 +79,15 @@ fun MyScreen() {
         AreaAction(onClick = { showLogin = true }) { Text("抖音 / B站平台登录") }
         AreaAction(onClick = { dialog = "storage" }) { Text("存储空间：${bytes / 1024 / 1024} MB") }
         AreaAction(onClick = { dialog = "feedback" }) { Text("意见反馈") }
-        AreaAction(onClick = { dialog = "diagnostics" }) { Text("导出诊断日志") }
+        AreaAction(onClick = { diagnosticExport.launch("GetAudio-diagnostics.txt") }) { Text("导出诊断日志") }
+        AreaAction(onClick = { scope.launch {
+            runCatching {
+                val text = DiagnosticsStore.exportFailures().ifBlank { "暂无失败诊断日志" }
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("GetAudio 诊断日志", text))
+            }.onSuccess { Toast.makeText(context, "已复制诊断日志", Toast.LENGTH_SHORT).show() }
+                .onFailure { Toast.makeText(context, "复制失败，请重试", Toast.LENGTH_SHORT).show() }
+        } }) { Text("复制诊断日志") }
         AreaAction(onClick = { showAgent = true }) { Text("音频助手") }
 
         AreaAction(onClick = { dialog = "about" }) { Text("版本 $version") }
@@ -83,10 +95,6 @@ fun MyScreen() {
     when (dialog) {
         "storage" -> InfoDialog("存储空间", "本机已保存 ${tracks.size} 首音频，约 ${bytes / 1024 / 1024} MB。") { dialog = null }
         "feedback" -> InfoDialog("意见反馈", "意见反馈功能暂未开放。") { dialog = null }
-        "diagnostics" -> AlertDialog(onDismissRequest = { dialog = null }, title = { Text("导出诊断日志") },
-            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("持续记录诊断步骤，导出全部失败或中断任务（共 ${DiagnosticsStore.failureCount} 次）。重启后仍保留；不会包含 Cookie、密码或完整媒体地址。")
-                AreaButton(onClick = { diagnosticExport.launch("GetAudio-diagnostics.txt"); dialog = null }, enabled = DiagnosticsStore.failureCount > 0) { Text("导出诊断日志") }
-            } }, confirmButton = { AreaButton(onClick = { dialog = null }) { Text("关闭") } })
         "about" -> AlertDialog(onDismissRequest = { dialog = null }, title = { Text("GetAudio $version") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("分享链接提取音频，分类、播放和管理均可在本机完成。")
             AreaButton(onClick = { dialog = "server" }) { Text("开发者选项") }

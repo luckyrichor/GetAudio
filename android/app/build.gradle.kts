@@ -12,10 +12,10 @@ android {
     defaultConfig {
         applicationId = "com.getaudio.app"
         minSdk = 26          // Media3 和后台播放在 8.0 以下坑太多
-        testInstrumentationRunner = "com.getaudio.app.BatchDeleteInstrumentation"
+        testInstrumentationRunner = providers.gradleProperty("getaudioTestRunner").getOrElse("com.getaudio.app.BatchDeleteInstrumentation")
         targetSdk = 34
-        versionCode = 16
-        versionName = "0.6.2"
+        versionCode = 17
+        versionName = "0.6.3"
         manifestPlaceholders["appLabel"] = "@string/app_name"
 
     }
