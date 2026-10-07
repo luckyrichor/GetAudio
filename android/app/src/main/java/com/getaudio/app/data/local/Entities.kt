@@ -37,6 +37,8 @@ data class TrackEntity(
     /** 本机重命名后保留显示名，云端同步不覆盖。 */
     val localTitleOverride: String? = null,
     @ColumnInfo(defaultValue = "0") val addedAtMs: Long = 0,
+    @ColumnInfo(defaultValue = "'local'") val cloudScope: String = "local",
+    val remoteTrackId: Long? = null,
 )
 
 @Entity(tableName = "categories")
@@ -78,3 +80,12 @@ data class SyncStateEntity(
     val cursor: Long = 0,
     val lastSyncAt: Long = 0,
 )
+
+@Entity(tableName = "active_scope")
+data class ActiveScopeEntity(@PrimaryKey val id: Int = 0, val scope: String = "")
+
+@Entity(tableName = "cloud_mapping", indices = [androidx.room.Index(value = ["scope", "remoteId"], unique = true)])
+data class CloudMappingEntity(@PrimaryKey val localId: Long, val scope: String, val remoteId: Long)
+
+@Entity(tableName = "cloud_sync")
+data class CloudSyncEntity(@PrimaryKey val scope: String, val cursor: Long = 0)

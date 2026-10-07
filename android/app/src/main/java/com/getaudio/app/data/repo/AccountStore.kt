@@ -10,6 +10,11 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.withLock
+import com.getaudio.app.data.local.AppDatabase
+import com.getaudio.app.data.local.ActiveScopeEntity
+import com.getaudio.app.player.PlayerHolder
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.HttpUrl
@@ -26,6 +31,7 @@ object AccountStore {
     private val state = MutableStateFlow<Account?>(null)
     val current = state.asStateFlow()
     private lateinit var file: File
+    private lateinit var appContext: Context
 
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -37,15 +43,17 @@ object AccountStore {
     }
 
     fun initialize(context: Context) {
+        appContext = context.applicationContext
         file = File(context.filesDir, "account-session.enc")
         state.value = runCatching {
             if (!file.exists()) return@runCatching null
             val data = JSONObject(String(decrypt(file.readBytes()), Charsets.UTF_8))
             Account(data.getString("user_id"), data.getString("phone"), data.getString("token"), data.getString("server"))
         }.getOrNull()
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { refreshVisibility(context) }
     }
 
-    fun save(session: AccountSession, baseUrl: String) {
+    suspend fun save(session: AccountSession, baseUrl: String) {
         val account = Account(session.userId, session.phone, session.sessionToken, baseUrl)
         val data = JSONObject().put("user_id", account.userId).put("phone", account.phone)
             .put("token", account.token).put("server", baseUrl).toString().toByteArray()
@@ -53,7 +61,11 @@ object AccountStore {
         val temp = File(file.parentFile, file.name + ".tmp")
         temp.writeBytes(encrypted)
         check(temp.renameTo(file)) { "无法保存账号登录状态" }
-        state.value = account
+        TrackRepository.fileMutex.withLock {
+            state.value = account
+            setVisibility()
+        }
+        reconcileQueue()
     }
 
     internal fun encrypt(bytes: ByteArray): ByteArray {
@@ -69,9 +81,29 @@ object AccountStore {
         return cipher.doFinal(bytes.copyOfRange(12, bytes.size))
     }
 
-    fun clear() {
-        file.delete()
-        state.value = null
+    suspend fun clear() {
+        TrackRepository.fileMutex.withLock { file.delete(); state.value = null; setVisibility() }
+        reconcileQueue()
+    }
+
+    private suspend fun setVisibility() {
+        val server = Settings(appContext).serverUrlNow()
+        val account = forServer(server)
+        AppDatabase.get(appContext).trackDao().setActive(ActiveScopeEntity(scope = account?.let { cloudScopeKey(server, it.userId) } ?: ""))
+    }
+
+    suspend fun refreshVisibility(context: Context) {
+        if (!::appContext.isInitialized) return
+        TrackRepository.fileMutex.withLock { setVisibility() }
+        reconcileQueue()
+    }
+
+    private suspend fun reconcileQueue() {
+        val visible = AppDatabase.get(appContext).trackDao().allNow().map { it.id }.toSet()
+        withContext(Dispatchers.Main) {
+            val hidden = PlayerHolder.queue.value.map { it.track.id }.filter { it !in visible }.toSet()
+            PlayerHolder.removeTracks(appContext, hidden)
+        }
     }
 
     fun forServer(baseUrl: String): Account? = state.value?.takeIf { it.serverUrl == baseUrl }

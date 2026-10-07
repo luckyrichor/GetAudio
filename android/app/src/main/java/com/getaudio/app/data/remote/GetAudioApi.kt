@@ -9,6 +9,7 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 
 interface GetAudioApi {
+    @POST("v2/migration/claim") suspend fun claimMigration(@Body body: MigrationClaim): MigrationResult
     @POST("account/register") suspend fun accountRegister(@Body body: AccountCredentials): AccountSession
     @POST("account/login") suspend fun accountLogin(@Body body: AccountCredentials): AccountSession
     @GET("account/me") suspend fun accountMe(): AccountIdentity
@@ -24,29 +25,29 @@ interface GetAudioApi {
     @POST("agent/chat")
     suspend fun agentChat(@Body body: AgentChatRequest): AgentChatResponse
 
-    @GET("agent/memories/{userId}")
+    @GET("v2/memories/{userId}")
     suspend fun agentMemories(@Path("userId") userId: String): List<AgentMemoryOut>
 
-    @POST("agent/memories")
+    @POST("v2/memories")
     suspend fun agentMemoryCreate(@Body body: AgentMemoryRequest): AgentMemoryOut
 
-    @PUT("agent/memories/{userId}/{memoryId}")
+    @PUT("v2/memories/{userId}/{memoryId}")
     suspend fun agentMemoryUpdate(
         @Path("userId") userId: String,
         @Path("memoryId") memoryId: Long,
         @Body body: AgentMemoryUpdate,
     ): AgentMemoryOut
 
-    @DELETE("agent/memories/{userId}/{memoryId}")
+    @DELETE("v2/memories/{userId}/{memoryId}")
     suspend fun agentMemoryDelete(
         @Path("userId") userId: String,
         @Path("memoryId") memoryId: Long,
     ): Map<String, Boolean>
 
-    @POST("extract")
+    @POST("v2/extract")
     suspend fun extract(@Body body: ExtractRequest): ExtractResponse
 
-    @GET("tracks")
+    @GET("v2/tracks")
     suspend fun tracks(
         @Query("q") query: String? = null,
         @Query("platform") platform: String? = null,
@@ -54,27 +55,26 @@ interface GetAudioApi {
         @Query("offset") offset: Int = 0,
     ): List<TrackDto>
 
-    @GET("sync")
+    @GET("v2/sync")
     suspend fun sync(
         @Query("cursor") cursor: Long,
         @Query("limit") limit: Int = 200,
     ): SyncResponse
 
-    @POST("login/qr")
+    @POST("v2/platforms/qr")
     suspend fun loginStart(@Body body: LoginStartRequest): LoginStartResponse
 
-    @GET("login/qr/{sessionId}")
+    @GET("v2/platforms/qr/{sessionId}")
     suspend fun loginPoll(@Path("sessionId") sessionId: String): LoginPollResponse
 
-    @POST("login/cookies")
+    @POST("v2/platforms/cookies")
     suspend fun importCookies(@Body body: CookieImportRequest): Map<String, String>
 
-    @GET("credentials/{userId}")
-    suspend fun credentials(@Path("userId") userId: String): List<CredentialDto>
+    @GET("v2/platforms/credentials")
+    suspend fun credentials(): List<CredentialDto>
 
-    @DELETE("credentials/{userId}/{platform}")
+    @DELETE("v2/platforms/credentials/{platform}")
     suspend fun revoke(
-        @Path("userId") userId: String,
         @Path("platform") platform: String,
     ): Map<String, Boolean>
 }

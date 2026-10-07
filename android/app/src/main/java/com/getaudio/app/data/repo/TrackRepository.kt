@@ -21,7 +21,7 @@ import java.io.File
 
 class TrackRepository(private val context: Context) {
 
-    companion object { private val fileMutex = Mutex() }
+    companion object { internal val fileMutex = Mutex() }
 
     private val db = AppDatabase.get(context)
     private val trackDao = db.trackDao()
@@ -104,16 +104,20 @@ class TrackRepository(private val context: Context) {
     /** Explicit fallback: ask the configured GetAudio server to extract, then cache its audio on this phone. */
     suspend fun extractViaServer(
         text: String, onDiagnostic: (String) -> Unit = {},
+        expectedAccount: AccountStore.Account? = null,
     ): Result<TrackEntity> = runCatching {
         val base = settings.serverUrlNow()
         require(base.isNotBlank()) { "请先到「我的 → 服务器设置」填写服务器地址" }
         onDiagnostic("服务器提取：已提交，等待处理")
-        val response = ApiProvider.api(base).extract(
-            ExtractRequest(text = text, userId = settings.userId()),
-        )
-        val entity = response.track.toEntity()
+        val account = expectedAccount ?: AccountStore.forServer(base) ?: error("请先登录 GetAudio 账号")
+        checkAccount(account)
+        val response = ApiProvider.api(base, account).extract(ExtractRequest(text = text))
+        val entity = fileMutex.withLock {
+            checkAccount(account)
+            scopedEntity(response.track, account)
+        }
         onDiagnostic("服务器提取：成功，开始下载音频到手机")
-        fileMutex.withLock { trackDao.restoreExtracted(entity) }
+        fileMutex.withLock { checkAccount(account); trackDao.restoreExtracted(entity) }
         download(entity).getOrThrow()
         onDiagnostic("服务器音频：下载完成，已加入本地音频库")
         trackDao.byId(entity.id) ?: entity
@@ -128,8 +132,10 @@ class TrackRepository(private val context: Context) {
             fileMutex.withLock {
                 val serverUrl = settings.serverUrlNow()
                 if (serverUrl.isBlank()) return@withLock 0
-                val api = ApiProvider.api(serverUrl)
-                var cursor = syncDao.cursor()
+                val account = AccountStore.forServer(serverUrl) ?: error("请先登录 GetAudio 账号")
+                val scope = cloudScopeKey(serverUrl, account.userId)
+                val api = ApiProvider.api(serverUrl, account)
+                var cursor = trackDao.cloudCursor(scope) ?: 0
                 var total = 0
 
                 // has_more 时继续拉，直到追平
@@ -137,13 +143,15 @@ class TrackRepository(private val context: Context) {
                     val page = api.sync(cursor = cursor)
                     if (page.items.isEmpty()) break
 
+                    checkAccount(account)
                     val (deleted, alive) = page.items.partition { it.deleted }
-                    trackDao.applySync(alive.map { it.toEntity() }, deleted.map { it.id })
-                    deletedIds.addAll(deleted.map { it.id }.filter { trackDao.byId(it) == null })
+                    val removed = trackDao.mappedIds(scope, deleted.map { it.id })
+                    trackDao.applySync(alive.map { scopedEntity(it, account) }, removed)
+                    deletedIds.addAll(removed.filter { trackDao.byId(it) == null })
 
                     total += page.items.size
                     cursor = page.nextCursor
-                    syncDao.put(SyncStateEntity(cursor = cursor, lastSyncAt = System.currentTimeMillis()))
+                    trackDao.saveCursor(com.getaudio.app.data.local.CloudSyncEntity(scope, cursor))
                     if (!page.hasMore) break
                 }
                 total
@@ -173,13 +181,15 @@ class TrackRepository(private val context: Context) {
             if (current.locallyEdited) error("本地剪辑文件已丢失，请恢复原版或重新剪辑")
             if (track.id < 0) error("本机音频文件已丢失，请重新提取")
 
-            val base = settings.serverUrlNow().trimEnd('/')
+            val account = AccountStore.forServer(settings.serverUrlNow()) ?: error("请先登录 GetAudio 账号")
+            check(current.cloudScope == cloudScopeKey(account.serverUrl, account.userId)) { "旧音频没有可确认的服务器归属，请重新提取" }
+            val base = account.serverUrl.trimEnd('/')
             val url = base + current.downloadUrl
             val request = Request.Builder().url(url).build()
 
             // 先写临时文件，完整了再改名 —— 中断的下载不会留下半个能播的文件
             val tmp = File(dest.absolutePath + ".part")
-            ApiProvider.okHttp().newCall(request).execute().use { resp ->
+            ApiProvider.okHttp(account).newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) error("下载失败：HTTP ${resp.code}")
                 val body = resp.body ?: error("下载失败：响应为空")
                 tmp.outputStream().use { out -> body.byteStream().copyTo(out) }
@@ -199,6 +209,7 @@ class TrackRepository(private val context: Context) {
                 tmp.delete()
                 error("音频内容已变更或下载不完整，请同步后重试")
             }
+            checkAccount(account)
             if (!tmp.renameTo(dest)) {
                 tmp.delete()
                 error("保存失败")
@@ -262,20 +273,27 @@ class TrackRepository(private val context: Context) {
     /** Explicitly restore the latest server file; never download over an edited file implicitly. */
     suspend fun restoreOriginal(id: Long): TrackEntity = withContext(Dispatchers.IO) {
         require(id > 0) { "此音频没有可恢复的服务器原版" }
-        val api = ApiProvider.api(settings.serverUrlNow())
+        val account = AccountStore.forServer(settings.serverUrlNow()) ?: error("请先登录 GetAudio 账号")
+        val current = trackDao.byId(id) ?: error("音频不存在")
+        check(current.cloudScope == cloudScopeKey(account.serverUrl, account.userId)) { "旧音频请重新提取" }
+        val api = ApiProvider.api(account.serverUrl, account)
         var cursor = 0L
         var original: TrackEntity? = null
         while (original == null) {
             val page = api.sync(cursor)
-            original = page.items.firstOrNull { it.id == id && !it.deleted }?.toEntity()
+            original = fileMutex.withLock {
+                checkAccount(account)
+                page.items.firstOrNull { it.id == current.remoteTrackId && !it.deleted }?.let { scopedEntity(it, account) }
+            }
             if (!page.hasMore || page.items.isEmpty()) break
             check(page.nextCursor > cursor) { "同步游标无效" }
             cursor = page.nextCursor
         }
         val fresh = original ?: error("服务器原版已不存在")
         val staged = File.createTempFile("restore-", ".audio", audioDir)
+        var committed = false
         try {
-            ApiProvider.okHttp().newCall(Request.Builder().url(settings.serverUrlNow().trimEnd('/') + fresh.downloadUrl).build()).execute().use { response ->
+            ApiProvider.okHttp(account).newCall(Request.Builder().url(account.serverUrl.trimEnd('/') + fresh.downloadUrl).build()).execute().use { response ->
                 check(response.isSuccessful) { "恢复失败：HTTP ${response.code}" }
                 val body = response.body ?: error("响应为空")
                 staged.outputStream().use { out -> body.byteStream().copyTo(out) }
@@ -290,18 +308,22 @@ class TrackRepository(private val context: Context) {
             withContext(NonCancellable) {
                 var previousPath: String? = null
                 val saved = fileMutex.withLock {
+                    checkAccount(account)
                     val current = trackDao.byId(id) ?: error("音频已被删除")
                     previousPath = current.localPath
                     val record = fresh.copy(localPath = staged.absolutePath, favorite = current.favorite,
                         localCategoryId = current.localCategoryId, addedAtMs = current.addedAtMs,
                         title = current.localTitleOverride ?: fresh.title, localTitleOverride = current.localTitleOverride)
-                    trackDao.upsertAll(listOf(record)); record
+                    trackDao.upsertAll(listOf(record)); committed = true; record
                 }
-                withContext(Dispatchers.Main) { PlayerHolder.edited(context, saved) }
+                withContext(Dispatchers.Main) {
+                    if (accountResponseIsCurrent(account, AccountStore.forServer(settings.serverUrlNow()), settings.serverUrlNow()))
+                        PlayerHolder.edited(context, saved)
+                }
                 previousPath?.takeIf { it != saved.localPath }?.let { File(it).delete() }
                 saved
             }
-        } catch (e: Exception) { if (trackDao.byId(id)?.localPath != staged.absolutePath) staged.delete(); throw e }
+        } catch (e: Exception) { if (!committed) staged.delete(); throw e }
     }
 
     /** 批量补齐未下载的音频，返回成功条数。给 WorkManager 用。 */
@@ -313,6 +335,19 @@ class TrackRepository(private val context: Context) {
         }
         return ok
     }
+    private suspend fun checkAccount(account: AccountStore.Account) {
+        check(AccountStore.forServer(settings.serverUrlNow()) == account) { "账号或服务器已切换，请重试" }
+    }
+
+    private suspend fun scopedEntity(dto: TrackDto, account: AccountStore.Account): TrackEntity = db.withTransaction {
+        val scope = cloudScopeKey(account.serverUrl, account.userId)
+        val existing = trackDao.mapping(scope, dto.id)
+        val id = existing?.localId ?: chooseCloudLocalId(dto.id, trackDao.usedIds().toSet()).also {
+            trackDao.addMapping(com.getaudio.app.data.local.CloudMappingEntity(it, scope, dto.id))
+        }
+        dto.toEntity().copy(id = id, cloudScope = scope, remoteTrackId = dto.id)
+    }
+
 }
 
 private fun TrackDto.toEntity() = TrackEntity(

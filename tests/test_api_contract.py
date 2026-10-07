@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from getaudio import api as server_api
+from getaudio import account_api
 
 DTO_FILE = Path(__file__).resolve().parent.parent / "android/app/src/main/java/com/getaudio/app/data/remote/Dto.kt"
 
@@ -48,13 +49,13 @@ KOTLIN = _kotlin_classes()
     "kotlin_name,server_model",
     [
         ("TrackDto", server_api.TrackOut),
-        ("ExtractRequest", server_api.ExtractRequest),
+        ("ExtractRequest", account_api.ExtractBody),
         ("ExtractResponse", server_api.ExtractResponse),
         ("SyncResponse", server_api.SyncResponse),
-        ("LoginStartRequest", server_api.LoginStartRequest),
+        ("LoginStartRequest", account_api.PlatformBody),
         ("LoginStartResponse", server_api.LoginStartResponse),
         ("LoginPollResponse", server_api.LoginPollResponse),
-        ("CookieImportRequest", server_api.CookieImportRequest),
+        ("CookieImportRequest", account_api.CookieBody),
         ("CredentialDto", server_api.CredentialOut),
         ("AgentChatRequest", server_api.AgentChatRequest),
         ("AgentLocalTrack", server_api.AgentLocalTrack),
@@ -86,8 +87,11 @@ def test_all_api_routes_are_declared_in_kotlin():
     # 音频下载（用 OkHttp 流式下载，不经 Retrofit）
     skip = {"/health", "/login/qr/{session_id}/image", "/audio/{track_id}", "/login/platforms"}
 
-    for route in server_api.app.routes:
-        path = getattr(route, "path", "")
+    skip.update({"/v2/platforms", "/v2/platforms/qr/{sid}/image", "/v2/audio/{track_id}"})
+    for path in server_api.app.openapi()["paths"]:
+        # Legacy admin/guest API is deliberately no longer the mobile contract.
+        if not path.startswith(("/account/", "/v2/", "/agent/v2/")):
+            continue
         if not path or path in skip or path.startswith("/openapi") or path.startswith("/docs") or path.startswith("/redoc"):
             continue
         # Retrofit 的路径不带前导斜杠，占位符名字也可能不同 —— 比对去掉占位符的骨架

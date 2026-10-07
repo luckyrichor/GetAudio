@@ -76,7 +76,7 @@ fun MyScreen() {
         }
 
         AreaAction(onClick = { dialog = "server" }) { Text("服务器设置") }
-        AreaAction(onClick = { showLogin = true }) { Text("抖音 / B站平台登录") }
+        AreaAction(onClick = { showLogin = true }) { Text("平台授权") }
         AreaAction(onClick = { dialog = "storage" }) { Text("存储空间：${bytes / 1024 / 1024} MB") }
         AreaAction(onClick = { dialog = "feedback" }) { Text("意见反馈") }
         AreaAction(onClick = { diagnosticExport.launch("GetAudio-diagnostics.txt") }) { Text("导出诊断日志") }

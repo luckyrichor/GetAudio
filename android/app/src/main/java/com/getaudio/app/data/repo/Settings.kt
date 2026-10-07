@@ -28,6 +28,7 @@ class Settings(private val context: Context) {
         // 结尾必须有斜杠，否则 Retrofit 会把 baseUrl 的最后一段吃掉
         val normalized = url.trim().takeIf { it.isNotEmpty() }?.trimEnd('/')?.plus("/") ?: ""
         context.dataStore.edit { it[serverKey] = normalized }
+        AccountStore.refreshVisibility(context)
     }
 
     suspend fun serverUrlNow(): String = serverUrl.first()

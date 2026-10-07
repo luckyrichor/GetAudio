@@ -15,6 +15,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import coil.ImageLoader
+import com.getaudio.app.data.repo.AccountStore
 import com.getaudio.app.data.remote.CredentialDto
 import com.getaudio.app.data.repo.ApiProvider
 import com.getaudio.app.data.repo.LoginRepository
@@ -115,19 +117,47 @@ private fun platformName(p: String) = if (p == "bilibili") "哔哩哔哩" else "
 @Composable
 fun LoginScreen() {
     val context = LocalContext.current
-    val vm: LoginViewModel = viewModel(factory = LoginViewModel.Factory(context))
+    val account by AccountStore.current.collectAsState()
+    var server by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) { server = com.getaudio.app.data.repo.Settings(context).serverUrlNow() }
+    val owner = account?.takeIf { it.serverUrl == server }
+    if (owner == null) {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            Text("请先登录 GetAudio 账号，再授权抖音或 B站。", Modifier.padding(16.dp))
+            AccountScreen()
+        }
+        return
+    }
+    val migration = remember { com.getaudio.app.data.repo.CredentialMigrationStore(context) }
+    var ticket by remember(owner) { mutableStateOf(runCatching { migration.ticket() }.getOrNull()) }
+    var migrationMessage by remember { mutableStateOf<String?>(null) }
+    val migrationScope = rememberCoroutineScope()
+    val loader = remember(owner) { ImageLoader.Builder(context).okHttpClient { ApiProvider.okHttp(owner) }.build() }
+    val vm: LoginViewModel = viewModel(key = owner.userId, factory = LoginViewModel.Factory(context))
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("可选服务器登录", style = MaterialTheme.typography.titleMedium)
+        Text("平台授权 · ${owner.maskedPhone}", style = MaterialTheme.typography.titleMedium)
         Text(
-            "这里的凭证只供可选同步服务器使用。手机直接提取目前支持公开作品，不读取其他 App 的登录状态。",
+            "抖音和 B站授权均属于当前 GetAudio 账号，可同时保留。服务器按需使用对应平台授权；手机直提取不读取其他 App 的登录状态。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
+        ticket?.let { value ->
+            OutlinedCard { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("此设备有旧平台授权，可迁移到 ${owner.maskedPhone}。已有授权不会被覆盖。")
+                AreaButton(onClick = { migrationScope.launch {
+                    runCatching { ApiProvider.api(owner.serverUrl, owner).claimMigration(com.getaudio.app.data.remote.MigrationClaim(value)) }
+                        .onSuccess { migration.clear(); ticket = null; vm.refresh(); migrationMessage = "旧授权已迁移" }
+                        .onFailure { migrationMessage = ApiProvider.humanMessage(it) }
+                } }) { Text("确认迁移到当前账号") }
+                AreaButton(onClick = { migration.clear(); ticket = null }) { Text("暂不迁移，重新授权") }
+            } }
+        }
+        migrationMessage?.let { Text(it) }
         if (vm.credentials.isNotEmpty()) {
             OutlinedCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -139,7 +169,7 @@ fun LoginScreen() {
                                 Modifier.weight(1f),
                                 style = MaterialTheme.typography.bodyMedium,
                             )
-                            AreaButton(onClick = { vm.revoke(c.platform) }, tone = ActionTone.DESTRUCTIVE) { Text("删除") }
+                            AreaButton(onClick = { vm.revoke(c.platform) }, tone = ActionTone.DESTRUCTIVE) { Text("解除授权") }
                         }
                     }
                 }
@@ -147,8 +177,8 @@ fun LoginScreen() {
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { vm.startQr("bilibili") }, enabled = !vm.busy) { Text("B站扫码登录") }
-            OutlinedButton(onClick = { vm.startQr("douyin") }, enabled = !vm.busy) { Text("抖音登录") }
+            Button(onClick = { vm.startQr("bilibili") }, enabled = !vm.busy) { Text("B站扫码授权") }
+            OutlinedButton(onClick = { vm.startQr("douyin") }, enabled = !vm.busy) { Text("抖音授权") }
         }
 
         vm.qrImageUrl?.let { url ->
@@ -158,7 +188,7 @@ fun LoginScreen() {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    AsyncImage(model = url, contentDescription = "登录二维码", modifier = Modifier.size(240.dp))
+                    AsyncImage(model = url, imageLoader = loader, contentDescription = "登录二维码", modifier = Modifier.size(240.dp))
                     Text(stateLabel(vm.state), style = MaterialTheme.typography.bodyMedium)
                 }
             }

@@ -31,7 +31,7 @@ fun AccountScreen() {
     var message by remember { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("GetAudio 账号", style = MaterialTheme.typography.titleLarge)
-        Text("同一手机号对应同一账号，登录后可继续音频助手会话和使用已保存偏好。账号登录与抖音、B站的平台登录分别管理。", style = MaterialTheme.typography.bodySmall)
+        Text("登录后可使用服务器提取、云端同步和音频助手。抖音与 B站可同时授权给这个账号。", style = MaterialTheme.typography.bodySmall)
         message?.let { Text(it) }
         if (account != null) {
             Text("已登录：${account.maskedPhone}")

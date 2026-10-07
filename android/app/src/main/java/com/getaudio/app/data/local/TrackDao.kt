@@ -10,14 +10,25 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface TrackDao {
 
-    @Query("SELECT * FROM tracks WHERE title LIKE '%' || :q || '%' AND (:startMs IS NULL OR addedAtMs >= :startMs) AND (:endMs IS NULL OR addedAtMs <= :endMs) ORDER BY addedAtMs DESC, id DESC")
+    @Query("SELECT * FROM tracks WHERE (cloudScope IN ('local','legacy_device') OR cloudScope = COALESCE((SELECT scope FROM active_scope WHERE id=0),'')) AND (title LIKE '%' || :q || '%' AND (:startMs IS NULL OR addedAtMs >= :startMs) AND (:endMs IS NULL OR addedAtMs <= :endMs)) ORDER BY addedAtMs DESC, id DESC")
     fun allWithTimeRange(q: String, startMs: Long?, endMs: Long?): Flow<List<TrackEntity>>
 
-    @Query("SELECT * FROM tracks WHERE localCategoryId = :categoryId ORDER BY addedAtMs DESC, id DESC")
+    @Query("SELECT * FROM tracks WHERE (cloudScope IN ('local','legacy_device') OR cloudScope = COALESCE((SELECT scope FROM active_scope WHERE id=0),'')) AND (localCategoryId = :categoryId) ORDER BY addedAtMs DESC, id DESC")
     fun inCategory(categoryId: Long): Flow<List<TrackEntity>>
 
-    @Query("SELECT * FROM tracks")
+    @Query("SELECT * FROM tracks WHERE (cloudScope IN ('local','legacy_device') OR cloudScope = COALESCE((SELECT scope FROM active_scope WHERE id=0),''))")
     suspend fun allNow(): List<TrackEntity>
+
+    @Query("SELECT * FROM cloud_mapping WHERE scope=:scope AND remoteId=:remoteId")
+    suspend fun mapping(scope: String, remoteId: Long): CloudMappingEntity?
+    @Query("SELECT localId FROM cloud_mapping UNION SELECT id FROM tracks")
+    suspend fun usedIds(): List<Long>
+    @Insert suspend fun addMapping(item: CloudMappingEntity)
+    @Query("SELECT localId FROM cloud_mapping WHERE scope=:scope AND remoteId IN (:remoteIds)")
+    suspend fun mappedIds(scope: String, remoteIds: List<Long>): List<Long>
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun setActive(item: ActiveScopeEntity)
+    @Query("SELECT cursor FROM cloud_sync WHERE scope=:scope") suspend fun cloudCursor(scope: String): Long?
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveCursor(item: CloudSyncEntity)
 
     @Query("UPDATE tracks SET title = :title, localTitleOverride = :title, updatedAtMs = :now WHERE id = :id")
     suspend fun rename(id: Long, title: String, now: Long)
@@ -44,25 +55,25 @@ interface TrackDao {
     @Query("SELECT id FROM deleted_tracks")
     suspend fun suppressedIds(): List<Long>
 
-    @Query("SELECT * FROM tracks WHERE (:platform IS NULL OR platform = :platform) AND (:favoritesOnly = 0 OR favorite = 1) AND (title LIKE '%' || :q || '%' OR uploader LIKE '%' || :q || '%' OR categories LIKE '%' || :q || '%') ORDER BY updatedSeq DESC")
+    @Query("SELECT * FROM tracks WHERE (cloudScope IN ('local','legacy_device') OR cloudScope = COALESCE((SELECT scope FROM active_scope WHERE id=0),'')) AND ((:platform IS NULL OR platform = :platform) AND (:favoritesOnly = 0 OR favorite = 1) AND (title LIKE '%' || :q || '%' OR uploader LIKE '%' || :q || '%' OR categories LIKE '%' || :q || '%')) ORDER BY updatedSeq DESC")
     fun filtered(q: String, platform: String?, favoritesOnly: Boolean): Flow<List<TrackEntity>>
 
-    @Query("SELECT * FROM tracks ORDER BY updatedSeq DESC")
+    @Query("SELECT * FROM tracks WHERE (cloudScope IN ('local','legacy_device') OR cloudScope = COALESCE((SELECT scope FROM active_scope WHERE id=0),'')) ORDER BY updatedSeq DESC")
     fun observeAll(): Flow<List<TrackEntity>>
 
-    @Query("SELECT * FROM tracks WHERE title LIKE '%' || :q || '%' OR uploader LIKE '%' || :q || '%' ORDER BY updatedSeq DESC")
+    @Query("SELECT * FROM tracks WHERE (cloudScope IN ('local','legacy_device') OR cloudScope = COALESCE((SELECT scope FROM active_scope WHERE id=0),'')) AND (title LIKE '%' || :q || '%' OR uploader LIKE '%' || :q || '%') ORDER BY updatedSeq DESC")
     fun search(q: String): Flow<List<TrackEntity>>
 
-    @Query("SELECT * FROM tracks WHERE platform = :platform ORDER BY updatedSeq DESC")
+    @Query("SELECT * FROM tracks WHERE (cloudScope IN ('local','legacy_device') OR cloudScope = COALESCE((SELECT scope FROM active_scope WHERE id=0),'')) AND (platform = :platform) ORDER BY updatedSeq DESC")
     fun byPlatform(platform: String): Flow<List<TrackEntity>>
 
-    @Query("SELECT * FROM tracks WHERE favorite = 1 ORDER BY updatedSeq DESC")
+    @Query("SELECT * FROM tracks WHERE (cloudScope IN ('local','legacy_device') OR cloudScope = COALESCE((SELECT scope FROM active_scope WHERE id=0),'')) AND (favorite = 1) ORDER BY updatedSeq DESC")
     fun favorites(): Flow<List<TrackEntity>>
 
-    @Query("SELECT * FROM tracks WHERE id = :id")
+    @Query("SELECT * FROM tracks WHERE (cloudScope IN ('local','legacy_device') OR cloudScope = COALESCE((SELECT scope FROM active_scope WHERE id=0),'')) AND (id = :id)")
     suspend fun byId(id: Long): TrackEntity?
 
-    @Query("SELECT * FROM tracks WHERE localPath IS NULL ORDER BY updatedSeq DESC LIMIT :limit")
+    @Query("SELECT * FROM tracks WHERE (cloudScope IN ('local','legacy_device') OR cloudScope = COALESCE((SELECT scope FROM active_scope WHERE id=0),'')) AND (localPath IS NULL) ORDER BY updatedSeq DESC LIMIT :limit")
     suspend fun notDownloaded(limit: Int): List<TrackEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

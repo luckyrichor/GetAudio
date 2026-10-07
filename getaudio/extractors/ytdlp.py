@@ -207,7 +207,8 @@ def _move_into_library(src: Path, info: MediaInfo) -> Path:
 
     文件名带 video_id 打头：重名不会撞，肉眼也能反查回源视频。
     """
-    dest_dir = settings.audio_dir / info.platform.value
+    from ..storage_scope import output_root
+    dest_dir = output_root(settings.audio_dir) / info.platform.value
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{info.video_id}-{safe_name(info.title)}{src.suffix.lower()}"
     shutil.move(str(src), str(dest))

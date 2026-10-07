@@ -88,6 +88,8 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
     var restoreTrack by remember { mutableStateOf<TrackEntity?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var syncing by remember { mutableStateOf(false) }
+    var accountDialog by remember { mutableStateOf(false) }
+    if (accountDialog) AccountLoginDialog { accountDialog = false }
     val serverUrl by remember(context) { Settings(context).serverUrl }.collectAsState(initial = "")
     var target by remember { mutableStateOf<LibraryTarget?>(null) }
     var dialog by remember { mutableStateOf<String?>(null) }
@@ -191,6 +193,7 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (serverUrl.isNotBlank()) AreaButton(onClick = { scope.launch {
+                        if (com.getaudio.app.data.repo.AccountStore.forServer(serverUrl) == null) { accountDialog = true; return@launch }
                         syncing = true
                         runCatching { DiagnosticsStore.operation("云端同步") { trackRepo.sync() } }.onSuccess { notice = "已同步 $it 条" }
                             .onFailure { notice = ApiProvider.humanMessage(it) }

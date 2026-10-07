@@ -59,9 +59,9 @@ def delete_memory(session: Session, user_id: str, memory_id: int) -> bool:
 
 
 def relevant_tracks(session: Session, question: str, memories: list[AgentMemory],
-                    local_tracks: list[dict] | None = None) -> list[dict]:
+                    local_tracks: list[dict] | None = None, owner_scope: str = "legacy") -> list[dict]:
     """先用数据库内的元数据筛选，再给模型少量候选；不让模型编造曲目。"""
-    rows = list(session.scalars(select(Track).where(Track.deleted == 0)
+    rows = list(session.scalars(select(Track).where(Track.deleted == 0, Track.owner_scope == owner_scope)
                                 .order_by(Track.updated_seq.desc()).limit(500)))
     candidates = [{"id": t.id, "title": t.title, "artist": t.uploader,
                    "platform": t.platform, "duration_sec": t.duration_sec,

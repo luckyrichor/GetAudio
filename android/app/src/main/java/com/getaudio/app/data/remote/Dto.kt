@@ -28,7 +28,6 @@ data class TrackDto(
 @Serializable
 data class ExtractRequest(
     val text: String,
-    @SerialName("user_id") val userId: String? = null,
     val force: Boolean = false,
 )
 
@@ -47,7 +46,6 @@ data class SyncResponse(
 
 @Serializable
 data class LoginStartRequest(
-    @SerialName("user_id") val userId: String,
     val platform: String,
 )
 
@@ -71,7 +69,6 @@ data class LoginPollResponse(
 
 @Serializable
 data class CookieImportRequest(
-    @SerialName("user_id") val userId: String,
     val platform: String,
     val cookies: String,
 )
@@ -159,3 +156,6 @@ data class AgentConversationDto(val id: String, @SerialName("created_at") val cr
 data class AgentEventDto(val role: String, val payload: kotlinx.serialization.json.JsonObject)
 @Serializable
 data class AgentHistoryDto(val events: List<AgentEventDto>, val actions: List<AgentActionDto>)
+
+@Serializable data class MigrationClaim(val ticket: String)
+@Serializable data class MigrationResult(val platforms: List<String>)

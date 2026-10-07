@@ -144,3 +144,22 @@ def test_concurrent_same_video_downloads_once(fake):
     assert fake.calls == 1
     assert sum(not out.reused for out in outcomes) == 1
     assert len({out.track_id for out in outcomes}) == 1
+
+
+def test_account_scope_dedupe_and_force_do_not_touch_other_account(fake, monkeypatch):
+    from getaudio.extractors.ytdlp import _move_into_library
+    original = fake.extract
+    def scoped(link, cookie_file=None):
+        result = original(link, cookie_file=cookie_file)
+        result.audio_path = _move_into_library(result.audio_path, result.info)
+        return result
+    monkeypatch.setattr(fake, 'extract', scoped)
+    a = pipeline.extract('https://www.bilibili.com/video/BV0000000001', user_id='acct_scope_test_a', owner_scope='acct_scope_test_a')
+    before = (settings.audio_dir / a.audio_path).read_bytes()
+    b = pipeline.extract('https://www.bilibili.com/video/BV0000000001', user_id='acct_scope_test_b', owner_scope='acct_scope_test_b')
+    assert a.track_id != b.track_id and a.audio_path != b.audio_path
+    assert fake.calls == 2
+    assert pipeline.extract('https://www.bilibili.com/video/BV0000000001', user_id='acct_scope_test_b', owner_scope='acct_scope_test_b').reused
+    pipeline.extract('https://www.bilibili.com/video/BV0000000001', user_id='acct_scope_test_b', owner_scope='acct_scope_test_b', force=True)
+    assert fake.calls == 3
+    assert (settings.audio_dir / a.audio_path).read_bytes() == before

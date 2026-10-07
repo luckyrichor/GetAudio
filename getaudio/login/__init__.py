@@ -42,7 +42,7 @@ class QrSession:
 
 
 _sessions: dict[str, QrSession] = {}
-_lock = threading.Lock()
+_lock = threading.RLock()
 
 
 def supported_platforms() -> list[str]:
@@ -80,9 +80,30 @@ def start(user_id: str, platform: str) -> QrSession:
     return session
 
 
-def poll(session_id: str) -> QrSession:
+def peek(session_id: str, owner: str | None = None) -> QrSession:
     with _lock:
         session = _sessions.get(session_id)
+        if session is None or (owner is not None and session.user_id != owner) or (owner is None and session.user_id.startswith("acct_")):
+            raise LoginError("授权会话不存在或已过期")
+        return session
+
+
+def cancel(user_id: str, platform: str):
+    with _lock:
+        for q in _sessions.values():
+            if q.user_id == user_id and q.platform == platform:
+                q.state = QrState.FAILED
+                q.message = "授权已解除"
+
+
+def poll(session_id: str, owner: str | None = None) -> QrSession:
+    # Serialize polling with revocation so an in-flight result cannot restore revoked cookies.
+    with _lock:
+        return _poll(session_id, owner)
+
+
+def _poll(session_id: str, owner: str | None = None) -> QrSession:
+    session = peek(session_id, owner)
     if session is None:
         raise LoginError("扫码会话不存在或已过期，请重新发起")
 

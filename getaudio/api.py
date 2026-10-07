@@ -282,7 +282,7 @@ def api_tracks(
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[TrackOut]:
-    stmt = select(Track).where(Track.deleted == 0)
+    stmt = select(Track).where(Track.deleted == 0, Track.owner_scope == "legacy")
     if q:
         stmt = stmt.where(Track.title.contains(q))
     if platform:
@@ -304,7 +304,7 @@ def api_sync(
     """
     stmt = (
         select(Track)
-        .where(Track.updated_seq > cursor)
+        .where(Track.updated_seq > cursor, Track.owner_scope == "legacy")
         .order_by(Track.updated_seq.asc())
         .limit(limit + 1)
     )
@@ -318,7 +318,7 @@ def api_sync(
 @app.get("/audio/{track_id}")
 def api_audio(track_id: int, session: Session = Depends(get_session)) -> FileResponse:
     track = session.get(Track, track_id)
-    if track is None or track.deleted:
+    if track is None or track.deleted or track.owner_scope != "legacy":
         raise HTTPException(status_code=404, detail="音频不存在")
     path = settings.audio_dir / track.audio_path
     if not path.exists():
@@ -424,3 +424,7 @@ def api_credential_revoke(user_id: str, platform: str) -> dict:
     if not credentials.revoke(user_id, platform):
         raise HTTPException(status_code=404, detail="没有这份凭证")
     return {"ok": True}
+
+
+from .account_api import router as account_resource_router
+app.include_router(account_resource_router)

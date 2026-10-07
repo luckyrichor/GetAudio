@@ -23,6 +23,7 @@ from .guest import ensure_guest_cookies
 from .models import ExtractJob, JobStatus, Track
 from .sharelink import LinkError, Platform, resolve
 from .tagging import write_tags
+from .storage_scope import audio_scope
 
 log = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ def _cookie_file_for(user_id: str | None, platform: Platform) -> Path | None:
 
     # 2. 手工放置的全局凭证（自用场景最省事）
     shared = settings.cookie_dir / f"{platform.value}.txt"
-    if shared.exists():
+    if shared.exists() and not (user_id or "").startswith("acct_"):
         return shared
 
     # 3. 访客预热
@@ -77,7 +78,7 @@ def _link_lock(platform: str, video_id: str):
         yield
 
 
-def extract(raw_input: str, *, user_id: str | None = None, force: bool = False) -> ExtractOutcome:
+def extract(raw_input: str, *, user_id: str | None = None, force: bool = False, owner_scope: str = "legacy") -> ExtractOutcome:
     """主入口：一段分享文本进，一条音频记录出。
 
     force=True 时忽略去重，重新下载并覆盖。
@@ -108,7 +109,7 @@ def extract(raw_input: str, *, user_id: str | None = None, force: bool = False) 
             _fail(str(exc))
             raise
 
-        with _link_lock(link.platform.value, link.track_key):
+        with audio_scope(owner_scope), _link_lock(owner_scope + ":" + link.platform.value, link.track_key):
             with session_scope() as s:
                 j = s.get(ExtractJob, job_id)
                 j.platform, j.video_id, j.resolved_url = link.platform.value, link.track_key, link.url
@@ -118,6 +119,7 @@ def extract(raw_input: str, *, user_id: str | None = None, force: bool = False) 
                 with session_scope() as s:
                     existing = s.execute(
                         select(Track).where(
+                            Track.owner_scope == owner_scope,
                             Track.platform == link.platform.value,
                             Track.video_id == link.track_key,
                             Track.deleted == 0,
@@ -160,11 +162,11 @@ def extract(raw_input: str, *, user_id: str | None = None, force: bool = False) 
             with session_scope() as s:
                 track = s.execute(
                     select(Track).where(
-                        Track.platform == link.platform.value, Track.video_id == link.track_key
+                        Track.owner_scope == owner_scope, Track.platform == link.platform.value, Track.video_id == link.track_key
                     )
                 ).scalar_one_or_none()
                 if track is None:
-                    track = Track(platform=link.platform.value, video_id=link.track_key, audio_path=rel_path, source_url=link.url)
+                    track = Track(owner_scope=owner_scope, platform=link.platform.value, video_id=link.track_key, audio_path=rel_path, source_url=link.url)
                     s.add(track)
 
                 info = result.info

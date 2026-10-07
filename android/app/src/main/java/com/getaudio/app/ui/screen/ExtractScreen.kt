@@ -127,6 +127,9 @@ fun ExtractScreen(prefill: String? = null, onSharedConsumed: () -> Unit = {}) {
     val context = LocalContext.current
     val vm: ExtractViewModel = viewModel(factory = ExtractViewModel.Factory(context))
     val snackbar = remember { SnackbarHostState() }
+    var accountDialog by remember { mutableStateOf(false) }
+    val server by remember { com.getaudio.app.data.repo.Settings(context).serverUrl }.collectAsState(initial = "")
+    if (accountDialog) AccountLoginDialog { accountDialog = false }
 
     LaunchedEffect(prefill) {
         if (!prefill.isNullOrBlank()) {
@@ -162,7 +165,7 @@ fun ExtractScreen(prefill: String? = null, onSharedConsumed: () -> Unit = {}) {
             Button(onClick = { vm.submit() }, enabled = !vm.busy && vm.input.isNotBlank(), modifier = Modifier.fillMaxWidth().height(52.dp), shape = MaterialTheme.shapes.large) {
                 Text(if (vm.busy && !vm.usingServer) "正在提取…" else "提取音频")
             }
-            OutlinedButton(onClick = { vm.submitViaServer() }, enabled = !vm.busy && vm.input.isNotBlank(), modifier = Modifier.fillMaxWidth().height(48.dp), shape = MaterialTheme.shapes.large) {
+            OutlinedButton(onClick = { if (com.getaudio.app.data.repo.AccountStore.forServer(server) == null) accountDialog = true else vm.submitViaServer() }, enabled = !vm.busy && vm.input.isNotBlank(), modifier = Modifier.fillMaxWidth().height(48.dp), shape = MaterialTheme.shapes.large) {
                 Text(if (vm.busy && vm.usingServer) "服务器提取中…" else "从服务器提取")
             }
             if (vm.busy) {

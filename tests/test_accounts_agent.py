@@ -109,7 +109,7 @@ def test_server_result_requires_matching_real_job(client):
     result = {'success': True, 'track_id': 987654, 'diagnostic': '下载完成'}
     assert client.post(endpoint + '/result', json=result, headers=headers).status_code == 400
     with session_scope() as session:
-        track = Track(platform='douyin', video_id=str(uuid4()), title='服务端音频', source_url=action['input_url'], audio_path='test')
+        track = Track(owner_scope=user['user_id'], platform='douyin', video_id=str(uuid4()), title='服务端音频', source_url=action['input_url'], audio_path='test')
         session.add(track); session.flush(); tid = track.id
         session.add(ExtractJob(raw_input=action['input_url'], user_id=user['user_id'], track_id=tid, status=JobStatus.DONE))
     assert client.post(endpoint + '/result', json={**result, 'track_id': tid}, headers=headers).json()['result']['source'] == 'server_verified'

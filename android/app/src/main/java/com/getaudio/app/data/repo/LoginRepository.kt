@@ -12,24 +12,25 @@ import kotlinx.coroutines.withContext
 class LoginRepository(context: Context) {
 
     private val settings = Settings(context)
+    private suspend fun api() = ApiProvider.api(settings.serverUrlNow(), AccountStore.forServer(settings.serverUrlNow()) ?: error("请先登录 GetAudio 账号"))
 
     suspend fun start(platform: String): Result<LoginStartResponse> = runCatching {
         withContext(Dispatchers.IO) {
-            ApiProvider.api(settings.serverUrlNow())
-                .loginStart(LoginStartRequest(userId = settings.userId(), platform = platform))
+            api()
+                .loginStart(LoginStartRequest(platform = platform))
         }
     }
 
     suspend fun poll(sessionId: String): Result<LoginPollResponse> = runCatching {
         withContext(Dispatchers.IO) {
-            ApiProvider.api(settings.serverUrlNow()).loginPoll(sessionId)
+            api().loginPoll(sessionId)
         }
     }
 
     suspend fun importCookies(platform: String, cookies: String): Result<Unit> = runCatching {
         withContext(Dispatchers.IO) {
-            ApiProvider.api(settings.serverUrlNow()).importCookies(
-                CookieImportRequest(userId = settings.userId(), platform = platform, cookies = cookies)
+            api().importCookies(
+                CookieImportRequest(platform = platform, cookies = cookies)
             )
             Unit
         }
@@ -37,13 +38,13 @@ class LoginRepository(context: Context) {
 
     suspend fun credentials(): Result<List<CredentialDto>> = runCatching {
         withContext(Dispatchers.IO) {
-            ApiProvider.api(settings.serverUrlNow()).credentials(settings.userId())
+            api().credentials()
         }
     }
 
     suspend fun revoke(platform: String): Result<Unit> = runCatching {
         withContext(Dispatchers.IO) {
-            ApiProvider.api(settings.serverUrlNow()).revoke(settings.userId(), platform)
+            api().revoke(platform)
             Unit
         }
     }

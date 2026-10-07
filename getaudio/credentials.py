@@ -105,10 +105,9 @@ def load(user_id: str, platform: str) -> dict[str, str] | None:
 def ensure_cookie_file(user_id: str, platform: str) -> Path | None:
     """确保 cookie 文件存在且是最新的，返回路径。"""
     path = _cookie_path(user_id, platform)
-    if path.exists():
-        return path
     cookies = load(user_id, platform)
     if not cookies:
+        path.unlink(missing_ok=True)
         return None
     return _export_cookie_file(user_id, platform, cookies)
 

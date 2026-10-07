@@ -31,6 +31,8 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
 
 def init_db() -> None:
+    from .schema_migrations import migrate_tracks
+    migrate_tracks(engine)
     Base.metadata.create_all(engine)
 
 

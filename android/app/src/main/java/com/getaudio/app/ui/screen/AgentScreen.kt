@@ -15,6 +15,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.getaudio.app.data.remote.*
 import com.getaudio.app.data.repo.AgentOutbox
+import com.getaudio.app.data.repo.accountResponseIsCurrent
 import com.getaudio.app.data.repo.AccountStore
 import com.getaudio.app.data.repo.ApiProvider
 import com.getaudio.app.data.repo.Settings
@@ -25,7 +26,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import java.util.UUID
 
-class AgentViewModel(context: Context) : ViewModel() {
+class AgentViewModel(context: Context, private val owner: AccountStore.Account?) : ViewModel() {
     private val outbox = AgentOutbox(context.applicationContext)
     private val settings = Settings(context.applicationContext)
     private val tracks = TrackRepository(context.applicationContext)
@@ -51,15 +52,24 @@ class AgentViewModel(context: Context) : ViewModel() {
     private var unsentResult: Pair<String, AgentToolResult>? = null
     var resultPending by mutableStateOf(false)
         private set
-    private var activeUser: String? = null
-    private var activeServer: String? = null
+    private val activeUser = owner?.userId
+    private val activeServer = owner?.serverUrl
+    private var initialized = false
+
+    private suspend fun ensureOwner() {
+        val server = settings.serverUrlNow()
+        check(accountResponseIsCurrent(owner, AccountStore.forServer(server), server)) {
+            "账号或服务器已切换，请重试"
+        }
+    }
 
     private suspend fun apiAndUser(): Pair<GetAudioApi, String> {
         val url = settings.serverUrlNow()
         require(url.isNotBlank()) { "请先在「我的 → 服务器设置」填写服务器地址" }
         AccountStore.requireSecureServer(url)
-        val account = AccountStore.forServer(url) ?: error("请先在「我的 → 账号」登录，再使用音频 Agent")
-        return ApiProvider.api(url) to account.userId
+        ensureOwner()
+        val account = owner ?: error("请先在「我的 → 账号」登录，再使用音频 Agent")
+        return ApiProvider.api(url, account) to account.userId
     }
 
     fun refresh() = viewModelScope.launch {
@@ -68,10 +78,9 @@ class AgentViewModel(context: Context) : ViewModel() {
             serverReady = settings.serverUrlNow().isNotBlank()
             val (api, user) = apiAndUser()
             val server = settings.serverUrlNow()
-            val scopeChanged = activeUser != user || activeServer != server
-            if (activeUser != user || activeServer != server) {
-                activeUser = user
-                activeServer = server
+            val scopeChanged = !initialized
+            if (!initialized) {
+                initialized = true
                 val receipt = outbox.load(user, server)
                 unsentResult = receipt?.let { it.actionId to it.result }
                 resultPending = receipt != null
@@ -79,9 +88,11 @@ class AgentViewModel(context: Context) : ViewModel() {
                 dialogue.clear(); actions.clear(); proposal = null
             }
             conversations.clear()
-            conversations.addAll(api.agentConversations())
+            val loadedConversations = api.agentConversations()
+            ensureOwner()
+            conversations.addAll(loadedConversations)
             if (scopeChanged && conversationId == null && conversations.isNotEmpty()) loadHistory(api, conversations.first().id)
-            api.agentMemories(user)
+            api.agentMemories(user).also { ensureOwner() }
         }.onSuccess { memories.clear(); memories.addAll(it) }
             .onFailure { memories.clear(); dialogue.clear(); actions.clear(); conversations.clear(); error = ApiProvider.humanMessage(it) }
     }
@@ -98,20 +109,24 @@ class AgentViewModel(context: Context) : ViewModel() {
             val local = tracks.observeAll().first().asSequence().filter { it.id < 0 }.take(100)
                 .map { AgentLocalTrack(it.id, it.title.take(200), it.uploader?.take(100),
                     it.platform, it.durationSec, it.categories.split(" · ").filter(String::isNotBlank).take(6)) }.toList()
-            api.extractionAgent(ExtractionAgentRequest(UUID.randomUUID().toString(), conversationId, text, local))
+            ensureOwner()
+            api.extractionAgent(ExtractionAgentRequest(UUID.randomUUID().toString(), conversationId, text, local)).also { ensureOwner() }
         }.onSuccess {
             conversationId = it.conversationId
             dialogue.add("音频助手" to it.answer)
             it.action?.let { action -> actions.add(action) }
             proposal = it.memoryProposal
             val (api, _) = apiAndUser()
-            conversations.clear(); conversations.addAll(api.agentConversations())
+            val updatedConversations = api.agentConversations()
+            ensureOwner()
+            conversations.clear(); conversations.addAll(updatedConversations)
         }.onFailure { question = text; error = ApiProvider.humanMessage(it) }
         busy = false
     }
 
     private suspend fun loadHistory(api: GetAudioApi, id: String) {
         val history = api.agentHistory(id)
+        ensureOwner()
         conversationId = id
         dialogue.clear()
         history.events.forEach { event ->
@@ -145,7 +160,7 @@ class AgentViewModel(context: Context) : ViewModel() {
         val id = conversationId ?: return@launch
         if (busy || resultPending) return@launch
         busy = true
-        runCatching { apiAndUser().first.agentClear(id) }
+        runCatching { apiAndUser().first.agentClear(id).also { ensureOwner() } }
             .onSuccess { conversationId = null; dialogue.clear(); actions.clear(); proposal = null; conversations.removeAll { it.id == id } }
             .onFailure { error = ApiProvider.humanMessage(it) }
         busy = false
@@ -161,6 +176,7 @@ class AgentViewModel(context: Context) : ViewModel() {
     private suspend fun reportResult() {
         val pending = unsentResult ?: return
         val updated = apiAndUser().first.agentResult(pending.first, pending.second)
+        ensureOwner()
         replaceAction(updated)
         outbox.clear(activeUser ?: error("请重新登录"), activeServer ?: error("请重新登录"))
         unsentResult = null; resultPending = false
@@ -178,24 +194,30 @@ class AgentViewModel(context: Context) : ViewModel() {
         busy = true; error = null; diagnostic = ""
         runCatching {
             val api = apiAndUser().first
-            replaceAction(api.agentClaim(action.id, AgentClaim(mode)))
+            val claimed = api.agentClaim(action.id, AgentClaim(mode))
+            try { ensureOwner() } catch (e: Exception) {
+                outbox.save(AgentOutbox.Receipt(owner!!.userId, owner.serverUrl, action.id,
+                    AgentToolResult(false, null, null, "账号已切换，提取未执行")))
+                throw e
+            }
+            replaceAction(claimed)
             val steps = mutableListOf<String>()
             val observe: (String) -> Unit = { line ->
-                diagnostic = line
+                if (AccountStore.current.value == owner) diagnostic = line
                 steps.add(line.replace(Regex("https?://[^\\s]+"), "[链接]"))
             }
-            val outcome = if (mode == "server") tracks.extractViaServer(action.inputUrl, observe)
+            val outcome = if (mode == "server") tracks.extractViaServer(action.inputUrl, observe, owner)
                           else tracks.extract(action.inputUrl, observe)
             val track = outcome.getOrNull()
             val failure = outcome.exceptionOrNull()
             val code = Regex("HTTP ?[0-9]{3}").find(failure?.message.orEmpty())?.value.orEmpty()
             val summary = if (track != null) "音频已保存到手机" else "${failure?.javaClass?.simpleName}: $code".trim()
-            val result = AgentToolResult(track != null, track?.id, track?.title?.take(200),
+            val result = AgentToolResult(track != null, if (mode == "server") track?.remoteTrackId else track?.id, track?.title?.take(200),
                 (steps.takeLast(12).joinToString("\n") + "\n" + summary).takeLast(2000))
+            outbox.save(AgentOutbox.Receipt(owner!!.userId, owner.serverUrl, action.id, result))
+            ensureOwner()
             dialogue.add("提取结果" to if (track != null) "音频已加入音频库：${track.title}" else
                 "提取失败：${failure?.let(ApiProvider::humanMessage) ?: "未知错误"}")
-            outbox.save(AgentOutbox.Receipt(activeUser ?: error("请重新登录"),
-                activeServer ?: error("请重新登录"), action.id, result))
             unsentResult = action.id to result; resultPending = true
             reportResult()
         }.onFailure { error = ApiProvider.humanMessage(it) }
@@ -211,6 +233,7 @@ class AgentViewModel(context: Context) : ViewModel() {
             val old = editing
             if (old == null) api.agentMemoryCreate(AgentMemoryRequest(user, text))
             else api.agentMemoryUpdate(user, old.id, AgentMemoryUpdate(text, old.revision))
+            ensureOwner()
         }.onSuccess { draft = ""; editing = null; refresh() }
             .onFailure { error = ApiProvider.humanMessage(it) }
         busy = false
@@ -221,14 +244,14 @@ class AgentViewModel(context: Context) : ViewModel() {
     fun delete(memory: AgentMemoryOut) = viewModelScope.launch {
         if (busy) return@launch
         busy = true; error = null
-        runCatching { val (api, user) = apiAndUser(); api.agentMemoryDelete(user, memory.id) }
+        runCatching { val (api, user) = apiAndUser(); api.agentMemoryDelete(user, memory.id); ensureOwner() }
             .onSuccess { refresh() }.onFailure { error = ApiProvider.humanMessage(it) }
         busy = false
     }
 
-    class Factory(private val context: Context) : ViewModelProvider.Factory {
+    class Factory(private val context: Context, private val owner: AccountStore.Account?) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T = AgentViewModel(context) as T
+        override fun <T : ViewModel> create(modelClass: Class<T>): T = AgentViewModel(context, owner) as T
     }
 }
 
@@ -236,9 +259,11 @@ class AgentViewModel(context: Context) : ViewModel() {
 fun AgentScreen() {
     val context = LocalContext.current
     val account by AccountStore.current.collectAsState()
-    var confirmClear by remember { mutableStateOf(false) }
-    val vm: AgentViewModel = viewModel(factory = AgentViewModel.Factory(context))
-    LaunchedEffect(account?.userId) { vm.refresh() }
+    val server by remember(context) { Settings(context).serverUrl }.collectAsState(initial = "")
+    var confirmClear by remember(account, server) { mutableStateOf(false) }
+    val ownerKey = "agent-${account?.userId}-${System.identityHashCode(account)}-$server"
+    val vm: AgentViewModel = viewModel(key = ownerKey, factory = AgentViewModel.Factory(context, account))
+    LaunchedEffect(ownerKey) { vm.refresh() }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("音频 Agent", style = MaterialTheme.typography.titleLarge)

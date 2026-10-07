@@ -9,8 +9,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [TrackEntity::class, SyncStateEntity::class, CategoryEntity::class,
-        PlaylistEntity::class, PlaylistItemEntity::class, DeletedTrackEntity::class],
-    version = 6,
+        PlaylistEntity::class, PlaylistItemEntity::class, DeletedTrackEntity::class,
+        ActiveScopeEntity::class, CloudMappingEntity::class, CloudSyncEntity::class],
+    version = 7,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -70,6 +71,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tracks ADD COLUMN cloudScope TEXT NOT NULL DEFAULT 'local'")
+                db.execSQL("ALTER TABLE tracks ADD COLUMN remoteTrackId INTEGER")
+                db.execSQL("UPDATE tracks SET cloudScope = 'legacy_device', remoteTrackId = id WHERE id > 0")
+                db.execSQL("CREATE TABLE active_scope (id INTEGER NOT NULL PRIMARY KEY, scope TEXT NOT NULL)")
+                db.execSQL("INSERT INTO active_scope VALUES (0,'')")
+                db.execSQL("CREATE TABLE cloud_mapping (localId INTEGER NOT NULL PRIMARY KEY, scope TEXT NOT NULL, remoteId INTEGER NOT NULL)")
+                db.execSQL("CREATE UNIQUE INDEX index_cloud_mapping_scope_remoteId ON cloud_mapping(scope,remoteId)")
+                db.execSQL("CREATE TABLE cloud_sync (scope TEXT NOT NULL PRIMARY KEY, cursor INTEGER NOT NULL)")
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -85,7 +99,7 @@ abstract class AppDatabase : RoomDatabase() {
                         db.execSQL("INSERT OR IGNORE INTO categories (id,name,parentId,kind,createdAt,accessCount,lastAccessedAt) VALUES (1,'未分类',NULL,'LEAF',0,0,0)")
                     }
                 })
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .build()
                 .also { instance = it }
         }

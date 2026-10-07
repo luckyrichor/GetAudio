@@ -44,12 +44,14 @@ class Track(Base):
     __tablename__ = "tracks"
     __table_args__ = (
         # 同一平台同一视频只存一份 —— 去重的第一道闸
-        UniqueConstraint("platform", "video_id", name="uq_track_platform_video"),
+        UniqueConstraint("owner_scope", "platform", "video_id", name="uq_track_scope_platform_video"),
         Index("ix_track_updated_seq", "updated_seq"),
         Index("ix_track_audio_sha256", "audio_sha256"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    owner_scope: Mapped[str] = mapped_column(String(64), nullable=False, default="legacy", server_default="legacy", index=True)
 
     platform: Mapped[str] = mapped_column(String(32), nullable=False)
     video_id: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -218,3 +220,12 @@ class AgentAction(Base):
     mode: Mapped[str | None] = mapped_column(String(16))
     result_json: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CredentialMigrationTicket(Base):
+    __tablename__ = 'credential_migration_tickets'
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    guest_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    claimed_by: Mapped[str | None] = mapped_column(String(64))
+    platforms_json: Mapped[str | None] = mapped_column(Text)

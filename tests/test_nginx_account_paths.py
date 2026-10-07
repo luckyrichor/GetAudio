@@ -1,0 +1,16 @@
+"""Deployment must expose only account endpoints with application authentication."""
+import re
+from pathlib import Path
+
+
+def test_nginx_account_route_allowlist():
+    config = Path('deploy/tx-https/getaudio.conf').read_text()
+    pattern = re.search(r'location ~ (\S+) \{', config).group(1)
+    for path in ['/account/register', '/account/login', '/account/me', '/account/logout',
+                 '/v2/sync', '/v2/platforms/qr/abc/image', '/agent/v2/actions']:
+        assert re.search(pattern, path), path
+    for path in ['/tracks', '/sync', '/audio/1', '/credentials', '/account/login-extra', '/agent/plan']:
+        assert not re.search(pattern, path), path
+    assert 'auth_basic_user_file /etc/nginx/getaudio.htpasswd;' in config
+    assert 'proxy_set_header X-Forwarded-For $remote_addr;' in config
+    assert 'proxy_pass http://127.0.0.1:8800;' in config

@@ -78,7 +78,7 @@ class Plan(BaseModel):
 def make_plan(session: Session, uid: str, message: str, history: list[dict], local: list[dict], url: str | None):
     memories = list(session.scalars(select(AgentMemory).where(
         AgentMemory.user_id == uid, AgentMemory.deleted == 0).order_by(AgentMemory.id).limit(50)))
-    tracks = agent.relevant_tracks(session, message, memories, local)
+    tracks = agent.relevant_tracks(session, message, memories, local, owner_scope=uid)
     allowed = {t["id"] for t in tracks}
     remember = bool(re.search(r"记住|记一下|保存.*偏好", message))
     fallback = Plan(answer=("我已识别分享链接，点击下面按钮选择手机或服务器提取。结果会记录在本次会话。" if url else
@@ -259,7 +259,7 @@ def tool_result(aid: UUID, req: ToolResult, user: AppUser = Depends(current_user
                 ExtractJob.raw_input == row.input_url, ExtractJob.track_id == req.track_id,
                 ExtractJob.status == JobStatus.DONE).order_by(ExtractJob.id.desc()))
             track = session.get(Track, req.track_id)
-            if job is None or track is None or track.deleted:
+            if job is None or track is None or track.deleted or track.owner_scope != user.id:
                 raise HTTPException(400, "未找到与此操作对应的服务器成功记录")
             source = "server_verified"
             req.title = track.title[:200]

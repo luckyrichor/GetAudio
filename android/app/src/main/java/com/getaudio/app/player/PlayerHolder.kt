@@ -147,6 +147,8 @@ object PlayerHolder {
 
     private suspend fun appendLocked(context: Context, items: List<QueueItem>): Int {
         if (items.isEmpty()) return 0
+        val repository = TrackRepository(context)
+        check(items.all { repository.byId(it.track.id) != null }) { "音频已移除或账号已切换" }
         val player = get(context)
         val lists = PlaylistRepository(context)
         val sourceId = lists.resolve(sourcePlaylistIdState.value)
