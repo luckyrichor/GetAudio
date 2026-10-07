@@ -51,7 +51,6 @@ KOTLIN = _kotlin_classes()
     [
         ("PlatformAuthStart", platform_accounts.StartBody),
         ("PlatformAuthProof", platform_accounts.ProofBody),
-        ("PlatformUnbind", platform_accounts.UnbindBody),
         ("TrackDto", server_api.TrackOut),
         ("ExtractRequest", account_api.ExtractBody),
         ("ExtractResponse", server_api.ExtractResponse),

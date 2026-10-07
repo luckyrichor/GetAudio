@@ -52,7 +52,7 @@ class PlatformCallbackAccessFilter(logging.Filter):
 
 logging.getLogger("uvicorn.access").addFilter(PlatformCallbackAccessFilter())
 
-app = FastAPI(title="GetAudio", version="0.8.0", lifespan=lifespan,
+app = FastAPI(title="GetAudio", version="0.8.1", lifespan=lifespan,
               dependencies=[Depends(accounts.protect_account_ids)])
 app.include_router(accounts.router)
 app.include_router(extraction_agent.router)

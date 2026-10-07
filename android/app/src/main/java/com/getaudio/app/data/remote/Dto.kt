@@ -206,7 +206,3 @@ data class PlatformAuthCompletion(
     val nickname: String,
     val session: AccountSession? = null,
 )
-@Serializable
-data class PlatformUnbind(
-    val password: String,
-)

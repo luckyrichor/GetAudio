@@ -120,14 +120,14 @@ def test_poll_secret_owner_logout_expiry_and_cancellation(flow):
     assert complete(c, p).status_code == 410
 
 
-def test_unbind_needs_password_and_prevents_future_platform_login(flow):
+def test_unbind_without_password_requires_session_and_prevents_future_platform_login(flow):
     c, _ = flow
     _, h = register(c)
     p = attempt(c, 'bind', h); verified(c, p, h); complete(c, p, h)
     waiting = attempt(c, 'bind', h)
     path = '/account/platform-bindings/bilibili/unbind'
-    assert c.post(path, headers=h, json={'password': 'wrong-password'}).status_code == 401
-    assert c.post(path, headers=h, json={'password': 'test-password-123'}).status_code == 200
+    assert c.post(path).status_code == 401
+    assert c.post(path, headers=h).status_code == 200
     assert c.get('/account/platform-bindings', headers=h).json() == []
     assert c.post('/account/platform-auth/status', json=waiting, headers=h).json()['status'] == 'failed'
     p = attempt(c, 'login'); verified(c, p); assert complete(c, p).status_code == 403
@@ -184,3 +184,28 @@ def test_callback_access_log_redacts_code_and_state():
     assert PlatformCallbackAccessFilter().filter(record)
     assert 'private-code' not in record.getMessage() and 'private-state' not in record.getMessage()
     assert '/account/platform-auth/douyin/callback' in record.getMessage()
+
+
+def test_other_phone_cannot_unbind_owner_binding(flow):
+    c, _ = flow
+    _, owner = register(c); _, other = register(c)
+    p = attempt(c, 'bind', owner); verified(c, p, owner)
+    assert complete(c, p, owner).status_code == 200
+    assert c.post('/account/platform-bindings/bilibili/unbind', headers=other).status_code == 200
+    assert len(c.get('/account/platform-bindings', headers=owner).json()) == 1
+    assert c.get('/account/platform-bindings', headers=other).json() == []
+
+
+def test_platform_can_bind_another_phone_after_owner_unbinds(flow):
+    c, _ = flow
+    first, owner = register(c); second, other = register(c)
+    p = attempt(c, 'bind', owner); verified(c, p, owner)
+    assert complete(c, p, owner).status_code == 200
+    p = attempt(c, 'bind', other); verified(c, p, other)
+    assert complete(c, p, other).status_code == 409
+    assert c.post('/account/platform-bindings/bilibili/unbind', headers=owner).status_code == 200
+    assert complete(c, p, other).status_code == 200
+    p = attempt(c, 'login'); verified(c, p)
+    logged_in = complete(c, p).json()['session']
+    assert logged_in['user_id'] == second['user_id']
+    assert logged_in['phone'] == second['phone'] != first['phone']

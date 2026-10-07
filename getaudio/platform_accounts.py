@@ -18,7 +18,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .accounts import authenticated_user, current_user, db, limit_auth, new_session, password_matches, token_hash
+from .accounts import authenticated_user, current_user, db, limit_auth, new_session, token_hash
 from .config import settings
 from .crypto import credential_aad, decrypt, encrypt
 from .login.bilibili import BilibiliLogin
@@ -38,11 +38,6 @@ class ProofBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     attempt_id: str = Field(min_length=32, max_length=128)
     poll_token: SecretStr = Field(min_length=32, max_length=128)
-
-
-class UnbindBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    password: SecretStr = Field(min_length=8, max_length=128)
 
 
 def douyin_ready() -> bool:
@@ -225,7 +220,7 @@ def complete(body: ProofBody, x_getaudio_session: str | None = Header(None), ses
     if row.mode == "bind":
         other = session.scalar(select(Binding).where(Binding.user_id == row.user_id, Binding.platform == row.platform))
         if (binding and binding.user_id != row.user_id) or (other and other.subject != row.subject):
-            session.rollback(); raise HTTPException(409, "平台账号已绑定其他手机号，或此手机号已绑定其他平台账号；请先解除原绑定")
+            session.rollback(); raise HTTPException(409, "该平台账号已绑定其他手机号，或当前手机号已绑定此平台的其他账号；请先在原账号解除绑定，再重新关联")
         if binding is None:
             binding = Binding(user_id=row.user_id, platform=row.platform, subject=row.subject, nickname=row.nickname)
             session.add(binding)
@@ -254,9 +249,7 @@ def complete(body: ProofBody, x_getaudio_session: str | None = Header(None), ses
 
 
 @router.post("/platform-bindings/{platform}/unbind", dependencies=[Depends(limit_auth)])
-def unbind(platform: Literal["bilibili", "douyin"], body: UnbindBody, user: AppUser = Depends(current_user), session: Session = Depends(db)):
-    if not password_matches(body.password.get_secret_value(), user.password_hash):
-        raise HTTPException(401, "密码不正确")
+def unbind(platform: Literal["bilibili", "douyin"], user: AppUser = Depends(current_user), session: Session = Depends(db)):
     session.execute(delete(Binding).where(Binding.user_id == user.id, Binding.platform == platform))
     session.execute(update(Attempt).where(Attempt.user_id == user.id, Attempt.platform == platform).values(status="failed", key_blob=None, cookie_blob=None))
     session.commit()

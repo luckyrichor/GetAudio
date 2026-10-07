@@ -11,7 +11,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.getaudio.app.data.remote.*
 import com.getaudio.app.data.repo.AccountStore
@@ -39,7 +38,6 @@ private fun PlatformAccountPanelContent(server: String, account: AccountStore.Ac
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var unbind by remember { mutableStateOf<PlatformAccountBinding?>(null) }
-    var password by remember { mutableStateOf("") }
     LaunchedEffect(server, account) {
         if (server.isBlank()) return@LaunchedEffect
         runCatching {
@@ -76,7 +74,7 @@ private fun PlatformAccountPanelContent(server: String, account: AccountStore.Ac
         Text(provider.note, style = MaterialTheme.typography.bodySmall)
         if (linked != null) {
             Text("$name 已绑定：${linked.nickname}")
-            TextButton(onClick = { unbind = linked; password = "" }, enabled = !busy && ticket == null) { Text("解除${name}登录绑定") }
+            TextButton(onClick = { unbind = linked }, enabled = !busy && ticket == null) { Text("解除${name}登录绑定") }
         } else OutlinedButton(onClick = {
             busy = true; message = null
             scope.launch {
@@ -131,18 +129,17 @@ private fun PlatformAccountPanelContent(server: String, account: AccountStore.Ac
             scope.launch { runCatching { api.platformAuthCancel(proof) } }
         }, enabled = !busy) { Text("取消／重新发起") }
     }
-    unbind?.let { linked -> AlertDialog(onDismissRequest = { if (!busy) { unbind = null; password = "" } },
+    unbind?.let { linked -> AlertDialog(onDismissRequest = { if (!busy) { unbind = null } },
         title = { Text("解除平台登录绑定") },
-        text = { Column { Text("请输入当前手机号账号密码。解除后无法用此平台登录；手机号账号及音频不删除。提取用的平台 Cookie 仍在原授权页独立管理。")
-            OutlinedTextField(password, { password = it.take(128) }, label = { Text("账号密码") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, enabled = !busy) } },
+        text = { Text("确认解除此平台的登录绑定？解除后无法用此平台登录；手机号账号及音频保留。该平台账号可重新绑定到其他手机号。提取用的平台 Cookie 仍在原授权页独立管理。") },
         confirmButton = { TextButton(onClick = {
             busy = true
             scope.launch {
-                runCatching { api.platformAccountUnbind(linked.platform, PlatformUnbind(password)); bindings = api.platformAccountBindings() }
-                    .onSuccess { unbind = null; password = ""; message = "已解除登录绑定" }
+                runCatching { check(AccountStore.current.value == expectedSaved) { "账号已切换，请重新打开页面" }; api.platformAccountUnbind(linked.platform); bindings = api.platformAccountBindings() }
+                    .onSuccess { unbind = null; message = "已解除登录绑定" }
                     .onFailure { message = ApiProvider.humanMessage(it) }
                 busy = false
             }
-        }, enabled = !busy && password.length >= 8) { Text("确认解除") } },
-        dismissButton = { TextButton(onClick = { unbind = null; password = "" }, enabled = !busy) { Text("取消") } }) }
+        }, enabled = !busy) { Text("确认解除") } },
+        dismissButton = { TextButton(onClick = { unbind = null }, enabled = !busy) { Text("取消") } }) }
 }
