@@ -47,8 +47,11 @@ fun AccountScreen() {
             OutlinedButton(onClick = {
                 busy = true
                 scope.launch {
-                    runCatching { ApiProvider.api(server, account).accountLogout() }
-                        .onSuccess { AccountStore.clear(account); message = "已退出登录" }
+                    runCatching {
+                        ApiProvider.api(server, account).accountLogout()
+                        AccountStore.clear(account)
+                    }
+                        .onSuccess { message = "已退出登录" }
                         .onFailure { message = "退出未完成：${ApiProvider.humanMessage(it)}，请联网后重试" }
                     busy = false
                 }
@@ -63,15 +66,18 @@ fun AccountScreen() {
                 visualTransformation = PasswordVisualTransformation())
             Button(onClick = {
                 if (register && confirmation != password) { message = "两次密码不一致"; return@Button }
+                val expectedSaved = saved
+                val requestServer = server
+                val requestBody = AccountCredentials(phone.trim(), password)
+                val requestRegister = register
                 busy = true
                 message = null
                 scope.launch {
                     runCatching {
-                        AccountStore.requireSecureServer(server)
-                        val api = ApiProvider.api(server)
-                        val body = AccountCredentials(phone.trim(), password)
-                        val session = if (register) api.accountRegister(body) else api.accountLogin(body)
-                        AccountStore.save(session, server, saved)
+                        AccountStore.requireSecureServer(requestServer)
+                        val api = ApiProvider.api(requestServer)
+                        val session = if (requestRegister) api.accountRegister(requestBody) else api.accountLogin(requestBody)
+                        AccountStore.save(session, requestServer, expectedSaved)
                     }.onSuccess { password = ""; confirmation = ""; message = "登录成功" }
                         .onFailure { message = ApiProvider.humanMessage(it) }
                     busy = false
