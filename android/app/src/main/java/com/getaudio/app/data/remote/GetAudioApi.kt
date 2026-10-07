@@ -9,6 +9,15 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 
 interface GetAudioApi {
+    @GET("account/platforms") suspend fun platformLoginCapabilities(): List<PlatformLoginCapability>
+    @GET("account/platform-bindings") suspend fun platformAccountBindings(): List<PlatformAccountBinding>
+    @POST("account/platform-auth/start") suspend fun platformAuthStart(@Body body: PlatformAuthStart): PlatformAuthTicket
+    @POST("account/platform-auth/status") suspend fun platformAuthStatus(@Body body: PlatformAuthProof): PlatformAuthStatus
+    @POST("account/platform-auth/image") suspend fun platformAuthImage(@Body body: PlatformAuthProof): okhttp3.ResponseBody
+    @POST("account/platform-auth/cancel") suspend fun platformAuthCancel(@Body body: PlatformAuthProof): Map<String, Boolean>
+    @POST("account/platform-auth/complete") suspend fun platformAuthComplete(@Body body: PlatformAuthProof): PlatformAuthCompletion
+    @POST("account/platform-bindings/{platform}/unbind") suspend fun platformAccountUnbind(@Path("platform") platform: String, @Body body: PlatformUnbind): Map<String, Boolean>
+
     @POST("v2/migration/claim") suspend fun claimMigration(@Body body: MigrationClaim): MigrationResult
     @POST("account/register") suspend fun accountRegister(@Body body: AccountCredentials): AccountSession
     @POST("account/login") suspend fun accountLogin(@Body body: AccountCredentials): AccountSession

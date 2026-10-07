@@ -229,3 +229,31 @@ class CredentialMigrationTicket(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     claimed_by: Mapped[str | None] = mapped_column(String(64))
     platforms_json: Mapped[str | None] = mapped_column(Text)
+
+
+class AccountPlatformBinding(Base):
+    __tablename__ = "account_platform_bindings"
+    __table_args__ = (UniqueConstraint("platform", "subject", name="uq_platform_subject"),
+                      UniqueConstraint("user_id", "platform", name="uq_account_platform"))
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("app_users.id"), index=True)
+    platform: Mapped[str] = mapped_column(String(32))
+    subject: Mapped[str] = mapped_column(String(256))
+    nickname: Mapped[str] = mapped_column(String(100), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AccountPlatformAttempt(Base):
+    __tablename__ = "account_platform_attempts"
+    state_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    poll_hash: Mapped[str] = mapped_column(String(64))
+    platform: Mapped[str] = mapped_column(String(32))
+    mode: Mapped[str] = mapped_column(String(16))
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("app_users.id"))
+    owner_session_hash: Mapped[str | None] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16), default="waiting")
+    subject: Mapped[str | None] = mapped_column(String(256))
+    nickname: Mapped[str] = mapped_column(String(100), default="")
+    key_blob: Mapped[bytes | None] = mapped_column()
+    cookie_blob: Mapped[bytes | None] = mapped_column()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

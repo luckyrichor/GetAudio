@@ -1,6 +1,8 @@
 package com.getaudio.app.ui.screen
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -29,9 +31,9 @@ fun AccountScreen() {
     var register by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
-    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("GetAudio 账号", style = MaterialTheme.typography.titleLarge)
-        Text("登录后可使用服务器提取、云端同步和音频助手。抖音与 B站可同时授权给这个账号。", style = MaterialTheme.typography.bodySmall)
+        Text("登录后可使用服务器提取、云端同步和音频助手。首次必须手机号注册；登录后可绑定抖音和 B站，之后通过已绑定的平台登录同一个手机号账号。", style = MaterialTheme.typography.bodySmall)
         message?.let { Text(it) }
         if (account != null) {
             Text("已登录：${account.maskedPhone}")
@@ -85,5 +87,7 @@ fun AccountScreen() {
             }, enabled = !busy && phone.isNotBlank() && password.length >= 8) { Text(if (busy) "处理中…" else if (register) "注册并登录" else "登录") }
             TextButton(onClick = { register = !register; message = null }, enabled = !busy) { Text(if (register) "已有账号，去登录" else "首次使用，注册账号") }
         }
+        HorizontalDivider()
+        PlatformAccountPanel(server, account, saved)
     }
 }

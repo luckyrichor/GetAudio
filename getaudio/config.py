@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     ark_models: str = "doubao-seed-2-0-mini-260428,doubao-seed-2-1-pro-260915"
     classify_timeout: float = 60.0
 
+    # Only server-side credentials; OAuth is disabled until all three are configured.
+    douyin_client_key: str = ""
+    douyin_client_secret: str = ""
+    douyin_redirect_uri: str = ""
+
     def ensure_dirs(self) -> None:
         for d in (self.audio_dir, self.tmp_dir, self.cookie_dir):
             d.mkdir(parents=True, exist_ok=True)

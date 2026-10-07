@@ -5,6 +5,7 @@
 把字段名和服务端 Pydantic 模型逐一对齐。
 """
 from __future__ import annotations
+from getaudio import platform_accounts
 
 import re
 from pathlib import Path
@@ -48,6 +49,9 @@ KOTLIN = _kotlin_classes()
 @pytest.mark.parametrize(
     "kotlin_name,server_model",
     [
+        ("PlatformAuthStart", platform_accounts.StartBody),
+        ("PlatformAuthProof", platform_accounts.ProofBody),
+        ("PlatformUnbind", platform_accounts.UnbindBody),
         ("TrackDto", server_api.TrackOut),
         ("ExtractRequest", account_api.ExtractBody),
         ("ExtractResponse", server_api.ExtractResponse),
@@ -87,6 +91,7 @@ def test_all_api_routes_are_declared_in_kotlin():
     # 音频下载（用 OkHttp 流式下载，不经 Retrofit）
     skip = {"/health", "/login/qr/{session_id}/image", "/audio/{track_id}", "/login/platforms"}
 
+    skip.add("/account/platform-auth/douyin/callback")
     skip.update({"/v2/platforms", "/v2/platforms/qr/{sid}/image", "/v2/audio/{track_id}"})
     for path in server_api.app.openapi()["paths"]:
         # Legacy admin/guest API is deliberately no longer the mobile contract.

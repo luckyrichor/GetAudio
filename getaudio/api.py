@@ -39,7 +39,20 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="GetAudio", version="0.5.0", lifespan=lifespan,
+class PlatformCallbackAccessFilter(logging.Filter):
+    def filter(self, record):
+        # Uvicorn access records contain the request target at args[2].
+        if isinstance(record.args, tuple) and len(record.args) == 5:
+            args = list(record.args)
+            if isinstance(args[2], str) and args[2].split("?", 1)[0] == "/account/platform-auth/douyin/callback":
+                args[2] = args[2].split("?", 1)[0]
+                record.args = tuple(args)
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(PlatformCallbackAccessFilter())
+
+app = FastAPI(title="GetAudio", version="0.8.0", lifespan=lifespan,
               dependencies=[Depends(accounts.protect_account_ids)])
 app.include_router(accounts.router)
 app.include_router(extraction_agent.router)
@@ -428,3 +441,6 @@ def api_credential_revoke(user_id: str, platform: str) -> dict:
 
 from .account_api import router as account_resource_router
 app.include_router(account_resource_router)
+
+from .platform_accounts import router as platform_account_router
+app.include_router(platform_account_router)

@@ -159,3 +159,54 @@ data class AgentHistoryDto(val events: List<AgentEventDto>, val actions: List<Ag
 
 @Serializable data class MigrationClaim(val ticket: String)
 @Serializable data class MigrationResult(val platforms: List<String>)
+
+
+@Serializable
+data class PlatformLoginCapability(
+    val platform: String,
+    val available: Boolean,
+    val method: String,
+    val note: String,
+)
+@Serializable
+data class PlatformAccountBinding(
+    val platform: String,
+    val nickname: String,
+)
+@Serializable
+data class PlatformAuthStart(
+    val platform: String,
+    val mode: String,
+)
+@Serializable
+data class PlatformAuthTicket(
+    @SerialName("attempt_id") val attemptId: String,
+    @SerialName("poll_token") val pollToken: String,
+    val platform: String,
+    val method: String,
+    @SerialName("qr_url") val qrUrl: String? = null,
+    @SerialName("authorization_url") val authorizationUrl: String? = null,
+    @SerialName("expires_in") val expiresIn: Int,
+)
+@Serializable
+data class PlatformAuthProof(
+    @SerialName("attempt_id") val attemptId: String,
+    @SerialName("poll_token") val pollToken: String,
+)
+@Serializable
+data class PlatformAuthStatus(
+    val status: String,
+    val nickname: String,
+    val message: String,
+)
+@Serializable
+data class PlatformAuthCompletion(
+    val bound: Boolean,
+    val platform: String,
+    val nickname: String,
+    val session: AccountSession? = null,
+)
+@Serializable
+data class PlatformUnbind(
+    val password: String,
+)
