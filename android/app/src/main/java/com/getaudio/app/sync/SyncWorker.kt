@@ -22,8 +22,10 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
     override suspend fun doWork(): Result {
         val repo = TrackRepository(applicationContext)
         return try {
-            repo.sync()
-            repo.downloadPending(limit = DOWNLOAD_BATCH)
+            com.getaudio.app.data.repo.DiagnosticsStore.operation("后台同步") {
+                repo.sync()
+                repo.downloadPending(limit = DOWNLOAD_BATCH)
+            }
             Result.success()
         } catch (e: Exception) {
             // 网络抖动是常态，交给 WorkManager 退避重试

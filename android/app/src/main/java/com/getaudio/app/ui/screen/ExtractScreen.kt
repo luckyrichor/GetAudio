@@ -19,6 +19,7 @@ import com.getaudio.app.data.local.TrackEntity
 import com.getaudio.app.data.repo.ApiProvider
 import com.getaudio.app.data.repo.TrackRepository
 import com.getaudio.app.data.repo.DiagnosticsStore
+import com.getaudio.app.data.repo.PendingNotice
 import com.getaudio.app.ui.formatDuration
 import kotlinx.coroutines.launch
 
@@ -33,6 +34,7 @@ class ExtractViewModel(private val repo: TrackRepository, private val version: S
         private set
     var usingServer by mutableStateOf(false)
         private set
+    internal val notification = PendingNotice<String>()
     private var startedAt = 0L
 
     private fun record(message: String) {
@@ -47,13 +49,20 @@ class ExtractViewModel(private val repo: TrackRepository, private val version: S
             usingServer = false
             error = null
             result = null
+            notification.take()
             startedAt = SystemClock.elapsedRealtime()
             DiagnosticsStore.beginLocal(version)
             repo.extract(text, ::record)
-                .onSuccess { result = it }
+                .onSuccess {
+                    result = it
+                    notification.post("${it.title} · ${formatDuration(it.durationSec)} · 已加入音频库")
+                    DiagnosticsStore.finish(true)
+                }
                 .onFailure {
                     error = ApiProvider.humanMessage(it)
-                    record("提取失败：${it.javaClass.simpleName}")
+                    notification.post(error!!)
+                    record("提取失败：${it.javaClass.simpleName} · $error")
+                    DiagnosticsStore.finish(false)
                 }
             busy = false
         }
@@ -67,14 +76,21 @@ class ExtractViewModel(private val repo: TrackRepository, private val version: S
             usingServer = true
             error = null
             result = null
+            notification.take()
             startedAt = SystemClock.elapsedRealtime()
             DiagnosticsStore.beginServer(version)
             record("手动选择服务器提取")
             repo.extractViaServer(text, ::record)
-                .onSuccess { result = it }
+                .onSuccess {
+                    result = it
+                    notification.post("${it.title} · ${formatDuration(it.durationSec)} · 已加入音频库")
+                    DiagnosticsStore.finish(true)
+                }
                 .onFailure {
                     error = ApiProvider.humanMessage(it)
-                    record("服务器提取失败：${it.javaClass.simpleName}")
+                    notification.post(error!!)
+                    record("服务器提取失败：${it.javaClass.simpleName} · $error")
+                    DiagnosticsStore.finish(false)
                 }
             busy = false
             usingServer = false
@@ -119,11 +135,13 @@ fun ExtractScreen(prefill: String? = null, onSharedConsumed: () -> Unit = {}) {
             vm.submit()
         } else if (vm.input.isBlank()) vm.pasteFromClipboard(context)
     }
-    LaunchedEffect(vm.result) {
-        vm.result?.let { snackbar.showSnackbar("${it.title} · ${formatDuration(it.durationSec)} · 已加入音频库", withDismissAction = true, duration = SnackbarDuration.Short) }
-    }
-    LaunchedEffect(vm.error) {
-        vm.error?.let { snackbar.showSnackbar(it, withDismissAction = true, duration = SnackbarDuration.Short) }
+    LaunchedEffect(Unit) {
+        snapshotFlow { vm.notification.value }.collect { message ->
+            if (message != null) {
+                vm.notification.take()
+                snackbar.showSnackbar(message, withDismissAction = true, duration = SnackbarDuration.Short)
+            }
+        }
     }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
@@ -138,8 +156,8 @@ fun ExtractScreen(prefill: String? = null, onSharedConsumed: () -> Unit = {}) {
                 shape = MaterialTheme.shapes.large,
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { vm.pasteFromClipboard(context) }, enabled = !vm.busy) { Text("粘贴剪贴板") }
-                TextButton(onClick = { vm.input = "" }, enabled = !vm.busy && vm.input.isNotBlank()) { Text("清空") }
+                AreaButton(onClick = { vm.pasteFromClipboard(context) }, enabled = !vm.busy, tone = ActionTone.SYNC) { Text("粘贴剪贴板") }
+                AreaButton(onClick = { vm.input = "" }, enabled = !vm.busy && vm.input.isNotBlank()) { Text("清空") }
             }
             Button(onClick = { vm.submit() }, enabled = !vm.busy && vm.input.isNotBlank(), modifier = Modifier.fillMaxWidth().height(52.dp), shape = MaterialTheme.shapes.large) {
                 Text(if (vm.busy && !vm.usingServer) "正在提取…" else "提取音频")

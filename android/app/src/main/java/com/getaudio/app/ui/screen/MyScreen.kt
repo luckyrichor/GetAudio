@@ -16,10 +16,14 @@ import androidx.compose.ui.unit.dp
 import com.getaudio.app.data.local.AppDatabase
 import com.getaudio.app.data.repo.DiagnosticsStore
 import java.io.File
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
-fun MyScreen(onCategories: () -> Unit) {
+fun MyScreen() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val tracks by AppDatabase.get(context).trackDao().observeAll().collectAsState(initial = emptyList())
     var dialog by remember { mutableStateOf<String?>(null) }
     var showAccount by remember { mutableStateOf(false) }
@@ -28,9 +32,14 @@ fun MyScreen(onCategories: () -> Unit) {
     var showAgent by remember { mutableStateOf(false) }
     val version = remember { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "未知" }
     val diagnosticExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        if (uri != null) runCatching {
-            context.contentResolver.openOutputStream(uri)?.use { it.write(DiagnosticsStore.lines.joinToString("\n").toByteArray()) }
-                ?: error("无法创建文件")
+        if (uri != null) scope.launch {
+            runCatching {
+                val text = DiagnosticsStore.exportFailures()
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
+                        ?: error("无法创建文件")
+                }
+            }.onFailure { DiagnosticsStore.event("导出诊断日志", it.javaClass.simpleName, false) }
         }
     }
     val bytes = tracks.sumOf { it.localPath?.let { path -> File(path).takeIf(File::exists)?.length() } ?: 0L }
@@ -64,7 +73,6 @@ fun MyScreen(onCategories: () -> Unit) {
 
         AreaAction(onClick = { dialog = "server" }) { Text("服务器设置") }
         AreaAction(onClick = { showLogin = true }) { Text("抖音 / B站平台登录") }
-        AreaAction(onClick = onCategories) { Text("类别管理") }
         AreaAction(onClick = { dialog = "storage" }) { Text("存储空间：${bytes / 1024 / 1024} MB") }
         AreaAction(onClick = { dialog = "feedback" }) { Text("意见反馈") }
         AreaAction(onClick = { dialog = "diagnostics" }) { Text("导出诊断日志") }
@@ -76,8 +84,8 @@ fun MyScreen(onCategories: () -> Unit) {
         "storage" -> InfoDialog("存储空间", "本机已保存 ${tracks.size} 首音频，约 ${bytes / 1024 / 1024} MB。") { dialog = null }
         "feedback" -> InfoDialog("意见反馈", "意见反馈功能暂未开放。") { dialog = null }
         "diagnostics" -> AlertDialog(onDismissRequest = { dialog = null }, title = { Text("导出诊断日志") },
-            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("遇到提取问题时，可以导出最近一次诊断步骤供排查。不会包含 Cookie 或完整媒体地址。")
-                AreaButton(onClick = { diagnosticExport.launch("GetAudio-diagnostics.txt"); dialog = null }, enabled = DiagnosticsStore.lines.isNotEmpty()) { Text("导出诊断日志") }
+            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("持续记录诊断步骤，导出全部失败或中断任务（共 ${DiagnosticsStore.failureCount} 次）。重启后仍保留；不会包含 Cookie、密码或完整媒体地址。")
+                AreaButton(onClick = { diagnosticExport.launch("GetAudio-diagnostics.txt"); dialog = null }, enabled = DiagnosticsStore.failureCount > 0) { Text("导出诊断日志") }
             } }, confirmButton = { AreaButton(onClick = { dialog = null }) { Text("关闭") } })
         "about" -> AlertDialog(onDismissRequest = { dialog = null }, title = { Text("GetAudio $version") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("分享链接提取音频，分类、播放和管理均可在本机完成。")

@@ -4,6 +4,10 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.activity.compose.BackHandler
+import com.getaudio.app.data.repo.DiagnosticsStore
 import androidx.compose.foundation.background
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.semantics.Role
@@ -48,6 +52,7 @@ private sealed interface LibraryTarget {
     data class Category(val category: CategoryEntity) : LibraryTarget
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun LibraryScreenV2(openCategories: Boolean = false) {
     val context = LocalContext.current
@@ -62,6 +67,16 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
     val sourcePlaylistId by PlayerHolder.sourcePlaylistId.collectAsState()
     val currentPlaylistId = sourcePlaylistId?.takeIf { id -> playlists.any { it.id == id } } ?: playlists.firstOrNull { it.isDefault }?.id
     val currentListName = playlists.firstOrNull { it.id == currentPlaylistId }?.name ?: "播放列表"
+    var selecting by remember { mutableStateOf(false) }
+    var batchIds by remember { mutableStateOf(emptySet<Long>()) }
+    var confirmBatchDelete by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+    fun exitSelection() { selecting = false; batchIds = emptySet(); confirmBatchDelete = false }
+    fun selectTrack(id: Long) {
+        selecting = true
+        batchIds = if (id in batchIds) batchIds - id else batchIds + id
+    }
+    BackHandler(enabled = selecting && !deleting) { exitSelection() }
     var section by remember { mutableIntStateOf(0) }
     LaunchedEffect(openCategories) { if (openCategories) section = 1 }
     var categoryId by remember { mutableStateOf<Long?>(null) }
@@ -93,6 +108,10 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
     val allTracks by db.trackDao().allWithTimeRange(query, startMs, endMs).collectAsState(initial = emptyList())
     val libraryTracks by db.trackDao().observeAll().collectAsState(initial = emptyList())
     val categoryTracks by db.trackDao().inCategory(categoryId ?: -1L).collectAsState(initial = emptyList())
+    val visibleTracks = if (section == 0) allTracks else categoryTracks
+    LaunchedEffect(visibleTracks, selecting) {
+        if (selecting) batchIds = batchIds.intersect(visibleTracks.map { it.id }.toSet())
+    }
     val snackbar = remember { SnackbarHostState() }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/*")) { uri: Uri? ->
         val track = exportTrack
@@ -106,7 +125,7 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
     }
     LaunchedEffect(notice) { notice?.let { snackbar.showSnackbar(it); notice = null } }
 
-    fun operate(block: suspend () -> Unit) { scope.launch { runCatching { block() }.onFailure { notice = it.message ?: "操作失败" } } }
+    fun operate(block: suspend () -> Unit) { scope.launch { runCatching { DiagnosticsStore.operation("音频库操作", block) }.onFailure { notice = it.message ?: "操作失败" } } }
     fun queueItems(tracks: List<TrackEntity>, play: Boolean, sourceId: Long? = null) = operate {
         val ready = mutableListOf<PlayerHolder.QueueItem>()
         for (track in tracks) {
@@ -142,6 +161,8 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
                     Box(Modifier.weight(1f).fillMaxHeight()
                         .background(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
                         .selectable(selected = selected, role = Role.Tab, onClick = {
+                            if (deleting) return@selectable
+                            exitSelection()
                             section = index
                             if (index == 1) categoryId = null
                         }), contentAlignment = Alignment.Center) {
@@ -149,6 +170,17 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                             color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                }
+            }
+            if (selecting) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).regionFrame().padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val visibleIds = visibleTracks.map { it.id }.toSet()
+                    Checkbox(checked = visibleIds.isNotEmpty() && batchIds.containsAll(visibleIds), enabled = !deleting,
+                        onCheckedChange = { batchIds = if (it) visibleIds else emptySet() })
+                    Text("全选 · 已选 ${batchIds.size}", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+                    AreaButton(onClick = { confirmBatchDelete = true }, enabled = batchIds.isNotEmpty() && !deleting, tone = ActionTone.DESTRUCTIVE) { Text("删除") }
+                    TextButton(onClick = { exitSelection() }, enabled = !deleting) { Text("取消") }
                 }
             }
             if (section == 0) {
@@ -160,7 +192,7 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (serverUrl.isNotBlank()) AreaButton(onClick = { scope.launch {
                         syncing = true
-                        runCatching { trackRepo.sync() }.onSuccess { notice = "已同步 $it 条" }
+                        runCatching { DiagnosticsStore.operation("云端同步") { trackRepo.sync() } }.onSuccess { notice = "已同步 $it 条" }
                             .onFailure { notice = ApiProvider.humanMessage(it) }
                         syncing = false
                     } }, enabled = !syncing, tone = ActionTone.SYNC) { Text(if (syncing) "同步中…" else "云端同步") }
@@ -178,13 +210,15 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
                 }
                 if (allTracks.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("暂无音频") }
                 else LazyColumn { items(allTracks, key = { it.id }) { track ->
-                    LibraryAudioRow(track, onPlay = { queueItems(listOf(track), true) }, onMore = { target = LibraryTarget.Audio(track) })
+                    LibraryAudioRow(track, onPlay = { queueItems(listOf(track), true) }, onMore = { target = LibraryTarget.Audio(track) },
+                        selecting = selecting, selected = track.id in batchIds, selectionEnabled = !deleting,
+                        onSelect = { selectTrack(track.id) })
                 } }
             } else {
                 val parent = allCategories.firstOrNull { it.id == categoryId }
                 if (parent != null) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        AreaButton(onClick = { categoryId = parent.parentId }) { Text("‹ 返回") }
+                        AreaButton(onClick = { exitSelection(); categoryId = parent.parentId }) { Text("‹ 返回") }
                         Text(categoryPath(parent, allCategories), modifier = Modifier.weight(1f).padding(start = 20.dp, end = 16.dp),
                             maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                     }
@@ -192,7 +226,7 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
                     Text("常用类别", Modifier.padding(16.dp, 8.dp), style = MaterialTheme.typography.titleSmall)
                     Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
                         frequent.filter { it.accessCount > 0 }.forEach { cat ->
-                            AssistChip(onClick = { categoryId = cat.id; operate { categoryRepo.recordAccess(cat.id) } },
+                            AssistChip(onClick = { exitSelection(); categoryId = cat.id; operate { categoryRepo.recordAccess(cat.id) } },
                                 label = { Text(cat.name) }, modifier = Modifier.padding(end = 8.dp))
                         }
                     }
@@ -213,7 +247,7 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
                             else libraryTracks.count { it.localCategoryId == cat.id }
                         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).regionFrame().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Folder, null)
-                            Column(Modifier.weight(1f).clickable { categoryId = cat.id; operate { categoryRepo.recordAccess(cat.id) } }.padding(12.dp)) {
+                            Column(Modifier.weight(1f).clickable { exitSelection(); categoryId = cat.id; operate { categoryRepo.recordAccess(cat.id) } }.padding(12.dp)) {
                                 Text(cat.name)
                                 Text(if (cat.kind == "CONTAINER") "$count 个类别" else "$count 首音频", style = MaterialTheme.typography.bodySmall)
                             }
@@ -222,12 +256,32 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
                         }
                     }
                     items(categoryTracks, key = { "t${it.id}" }) { track ->
-                        LibraryAudioRow(track, onPlay = { queueItems(listOf(track), true) }, onMore = { target = LibraryTarget.Audio(track) })
+                        LibraryAudioRow(track, onPlay = { queueItems(listOf(track), true) }, onMore = { target = LibraryTarget.Audio(track) },
+                        selecting = selecting, selected = track.id in batchIds, selectionEnabled = !deleting,
+                        onSelect = { selectTrack(track.id) })
                     }
                 }
             }
         }
     }
+
+    if (confirmBatchDelete) AlertDialog(
+        onDismissRequest = { if (!deleting) confirmBatchDelete = false }, title = { Text("删除 ${batchIds.size} 个音频？") },
+        text = { Text("将删除手机上的音频文件，并从所有播放列表及正在播放的队列中移除。") },
+        confirmButton = { AreaButton(onClick = {
+            val ids = batchIds.toSet()
+            deleting = true
+            scope.launch {
+                try {
+                    val count = DiagnosticsStore.operation("批量删除") { trackRepo.removeAll(ids) }
+                    exitSelection()
+                    notice = "已删除 $count 个音频"
+                } catch (error: Exception) { notice = ApiProvider.humanMessage(error) }
+                finally { deleting = false; confirmBatchDelete = false }
+            }
+        }, enabled = !deleting, tone = ActionTone.DESTRUCTIVE) { Text(if (deleting) "删除中…" else "删除") } },
+        dismissButton = { TextButton(onClick = { confirmBatchDelete = false }, enabled = !deleting) { Text("取消") } },
+    )
 
     editTrack?.let { track -> AudioEditScreen(track, onClose = { editTrack = null }, onSaved = { editTrack = null; notice = "剪辑已保存" }) }
     restoreTrack?.let { track -> AlertDialog(onDismissRequest = { restoreTrack = null }, title = { Text("恢复服务器原版？") }, text = { Text("本地剪辑版将替换为服务器原版，收藏与播放列表保留。") }, confirmButton = { TextButton(onClick = { restoreTrack = null; operate { trackRepo.restoreOriginal(track.id); notice = "已恢复原版" } }) { Text("恢复") } }, dismissButton = { TextButton(onClick = { restoreTrack = null }) { Text("取消") } }) }
@@ -407,25 +461,31 @@ private fun categoryPath(category: CategoryEntity, all: List<CategoryEntity>): S
     return names.asReversed().joinToString(" / ")
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LibraryAudioRow(track: TrackEntity, onPlay: () -> Unit, onMore: () -> Unit) {
+private fun LibraryAudioRow(track: TrackEntity, onPlay: () -> Unit, onMore: () -> Unit,
+    selecting: Boolean = false, selected: Boolean = false, selectionEnabled: Boolean = true, onSelect: () -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val queue by PlayerHolder.queue.collectAsState()
     val index by PlayerHolder.currentIndex.collectAsState()
     val playing by PlayerHolder.isPlaying.collectAsState()
     val isCurrent = queue.getOrNull(index)?.track?.id == track.id
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).regionFrame(isCurrent).padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).regionFrame(if (selecting) selected else isCurrent)
+        .combinedClickable(enabled = selectionEnabled, onClick = { if (selecting) onSelect() }, onLongClick = onSelect,
+            onLongClickLabel = "选择音频")
+        .padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (selecting) Checkbox(checked = selected, enabled = selectionEnabled, onCheckedChange = { onSelect() })
         Column(Modifier.weight(1f).padding(8.dp)) {
             Text(track.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(track.uploader ?: track.platform, style = MaterialTheme.typography.bodySmall)
             Text(if (track.addedAtMs > 0) displayDateTime(track.addedAtMs, seconds = true) else "时间未记录",
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        IconButton(onClick = { if (isCurrent) scope.launch { PlayerHolder.toggle(context) } else onPlay() }) {
+        if (!selecting) IconButton(onClick = { if (isCurrent) scope.launch { PlayerHolder.toggle(context) } else onPlay() }) {
             Icon(if (isCurrent && playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (isCurrent && playing) "暂停音频" else "播放音频", tint = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
         }
-        IconButton(onClick = onMore) { Icon(Icons.Default.MoreVert, "更多") }
+        if (!selecting) IconButton(onClick = onMore) { Icon(Icons.Default.MoreVert, "更多") }
     }
 }
 

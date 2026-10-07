@@ -66,6 +66,10 @@ object PlayerHolder {
         return connect(context).also { connected ->
             controller = connected
             connected.addListener(object : Player.Listener {
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    com.getaudio.app.data.repo.DiagnosticsStore.event("音频播放", "播放器错误：${error.errorCodeName}", false)
+                }
+
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     playingState.value = isPlaying
                 }

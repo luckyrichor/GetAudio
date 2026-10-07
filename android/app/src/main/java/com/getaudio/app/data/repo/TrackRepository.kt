@@ -57,17 +57,29 @@ class TrackRepository(private val context: Context) {
         }
     }
 
-    suspend fun remove(id: Long) {
-        val track = trackDao.byId(id) ?: return
-        fileMutex.withLock {
-            db.withTransaction {
-                if (id > 0) trackDao.suppress(id)
-                db.playlistDao().removeTrack(id)
-                trackDao.delete(id)
+    suspend fun remove(id: Long) { removeAll(setOf(id)) }
+
+    /** Delete metadata and every playlist reference in one transaction, then reconcile playback. */
+    suspend fun removeAll(ids: Set<Long>): Int {
+        if (ids.isEmpty()) return 0
+        return withContext(NonCancellable) {
+            val removed = withContext(Dispatchers.IO) {
+                fileMutex.withLock {
+                    db.withTransaction {
+                        val tracks = ids.mapNotNull { trackDao.byId(it) }
+                        tracks.filter { it.id > 0 }.forEach { trackDao.suppress(it.id) }
+                        // Bound query size so selecting a large library cannot exceed SQLite bind limits.
+                        tracks.map { it.id }.chunked(500).forEach {
+                            trackDao.removePlaylistReferences(it)
+                            trackDao.deleteByIds(it)
+                        }
+                        tracks
+                    }.also { removed -> removed.forEach { it.localPath?.let { path -> File(path).delete() } } }
+                }
             }
+            withContext(Dispatchers.Main) { PlayerHolder.removeTracks(context, removed.map { it.id }.toSet()) }
+            removed.size
         }
-        withContext(NonCancellable + Dispatchers.Main) { PlayerHolder.removeTracks(context, setOf(id)) }
-        track.localPath?.let { File(it).delete() }
     }
 
     suspend fun setFavorite(id: Long, fav: Boolean) = trackDao.setFavorite(id, fav)
@@ -77,10 +89,13 @@ class TrackRepository(private val context: Context) {
     /** 分享文本由手机直接提取，保存到本地库，不依赖 GetAudio 服务器。 */
     suspend fun extract(text: String, onDiagnostic: (String) -> Unit = {}): Result<TrackEntity> = runCatching {
         withContext(Dispatchers.IO) {
-            val entity = DirectExtractor(context) { line ->
-                withContext(Dispatchers.Main) { onDiagnostic(line) }
-            }.extract(text)
-            fileMutex.withLock { trackDao.upsertLocal(entity) }
+            val entity = fileMutex.withLock {
+                val extracted = DirectExtractor(context) { line ->
+                    withContext(Dispatchers.Main) { onDiagnostic(line) }
+                }.extract(text)
+                trackDao.upsertLocal(extracted)
+                extracted
+            }
             withContext(Dispatchers.Main) { onDiagnostic("已加入本地音频库") }
             entity
         }

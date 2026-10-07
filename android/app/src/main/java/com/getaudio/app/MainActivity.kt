@@ -68,7 +68,7 @@ class MainActivity : ComponentActivity() {
                         when (tab) {
                             Tab.LIBRARY -> LibraryScreenV2(openCategories)
                             Tab.EXTRACT -> ExtractScreen(prefill = shared, onSharedConsumed = { shared = null })
-                            Tab.MY -> MyScreen(onCategories = { openCategories = true; tab = Tab.LIBRARY })
+                            Tab.MY -> MyScreen()
                         }
                     }
                 }

@@ -70,6 +70,17 @@ object ApiProvider {
     }
 
     private val client = OkHttpClient.Builder()
+        .addInterceptor { chain ->
+            // Never record URL paths, query strings, headers, bodies or account identifiers.
+            try {
+                chain.proceed(chain.request()).also { response ->
+                    DiagnosticsStore.event("网络请求", "${chain.request().method} · HTTP ${response.code}", response.isSuccessful)
+                }
+            } catch (error: java.io.IOException) {
+                DiagnosticsStore.event("网络请求", error.javaClass.simpleName, false)
+                throw error
+            }
+        }
         // 提取是同步阻塞的，服务器那边要下载加转码，给足时间
         .addNetworkInterceptor { chain ->
             val request = chain.request()

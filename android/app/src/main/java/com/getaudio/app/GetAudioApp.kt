@@ -7,6 +7,7 @@ class GetAudioApp : Application() {
     override fun onCreate() {
         super.onCreate()
         com.getaudio.app.data.repo.ApiProvider.initialize(this)
+        com.getaudio.app.data.repo.DiagnosticsStore.initialize(this)
         // 周期性同步：每 6 小时，仅在 WiFi 下
         SyncWorker.schedule(this)
     }
