@@ -105,10 +105,10 @@ class LoginViewModel(private val repo: LoginRepository) : ViewModel() {
         repo.revoke(platform).onSuccess { refresh() }
     }
 
-    class Factory(private val context: Context) : ViewModelProvider.Factory {
+    class Factory(private val context: Context, private val owner: AccountStore.Account) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            LoginViewModel(LoginRepository(context)) as T
+            LoginViewModel(LoginRepository(context, owner)) as T
     }
 }
 
@@ -118,8 +118,7 @@ private fun platformName(p: String) = if (p == "bilibili") "哔哩哔哩" else "
 fun LoginScreen() {
     val context = LocalContext.current
     val account by AccountStore.current.collectAsState()
-    var server by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) { server = com.getaudio.app.data.repo.Settings(context).serverUrlNow() }
+    val server by remember(context) { com.getaudio.app.data.repo.Settings(context).serverUrl }.collectAsState(initial = "")
     val owner = account?.takeIf { it.serverUrl == server }
     if (owner == null) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -133,7 +132,7 @@ fun LoginScreen() {
     var migrationMessage by remember { mutableStateOf<String?>(null) }
     val migrationScope = rememberCoroutineScope()
     val loader = remember(owner) { ImageLoader.Builder(context).okHttpClient { ApiProvider.okHttp(owner) }.build() }
-    val vm: LoginViewModel = viewModel(key = owner.userId, factory = LoginViewModel.Factory(context))
+    val vm: LoginViewModel = viewModel(key = "platform-${owner.userId}-${System.identityHashCode(owner)}-$server", factory = LoginViewModel.Factory(context, owner))
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),

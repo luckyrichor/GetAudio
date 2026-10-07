@@ -84,6 +84,10 @@ Content-Type: application/json
 
 ## 验证记录
 
-候选代码：tx隔离数据库 Python **147项通过**；Mac **146项通过、1项排除**（已知FFmpeg缺Chromaprint）；Android **49项JVM通过**，Lint **0错误、9警告、1提示**，debug/release/test APK构建成功。独立代码审查发现并修复账号切换竞态，复核通过。
+候选代码：tx隔离数据库 Python **148项通过**；Mac **147项通过、1项排除**（已知FFmpeg缺Chromaprint）；Android **49项JVM通过**，Lint **0错误、9警告、1提示**，debug/release/test APK构建成功。独立代码审查发现并修复账号切换竞态，复核通过。
 
-生产部署、公网隔离、真机Room迁移、升级后播放与真实提取的记录将在实际执行后补充。构建和模拟提取测试不代表平台真实授权成功。
+生产代码 c9b3dcb 已部署至 tx，Nginx/API active，8800仍回环。数据库旧5条记录/ID保留，唯一约束及PRAGMA检查通过。备份：`/home/ubuntu/backups/getaudio-pre-070-20261007T023536Z`，数据库完整性与私有权限已核验。
+
+公网 HTTPS 无Basic注册/登录、会话查询成功；无令牌401、跨账号音频404、个人同步隔离、伪造身份422、退出后401、旧路径Basic401均实测通过。两临时账号、令牌、测试音频均已清理。
+
+手机同包名同签名已升级0.7.0/code18，原两条音频仍显示，游客同步正确弹出GetAudio登录。独立Room测试组件两次被手机拦截（INSTALL_FAILED_USER_RESTRICTED），该项未运行；等待用户允许测试组件及完成本人注册后继续真实提取验证。构建和模拟提取测试不代表平台真实授权成功。

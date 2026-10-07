@@ -38,7 +38,7 @@ fun AccountScreen() {
             Button(onClick = {
                 busy = true
                 scope.launch {
-                    runCatching { ApiProvider.api(server).accountMe() }
+                    runCatching { ApiProvider.api(server, account).accountMe() }
                         .onSuccess { message = "账号登录正常" }
                         .onFailure { message = ApiProvider.humanMessage(it) }
                     busy = false
@@ -47,8 +47,8 @@ fun AccountScreen() {
             OutlinedButton(onClick = {
                 busy = true
                 scope.launch {
-                    runCatching { ApiProvider.api(server).accountLogout() }
-                        .onSuccess { AccountStore.clear(); message = "已退出登录" }
+                    runCatching { ApiProvider.api(server, account).accountLogout() }
+                        .onSuccess { AccountStore.clear(account); message = "已退出登录" }
                         .onFailure { message = "退出未完成：${ApiProvider.humanMessage(it)}，请联网后重试" }
                     busy = false
                 }
@@ -71,7 +71,7 @@ fun AccountScreen() {
                         val api = ApiProvider.api(server)
                         val body = AccountCredentials(phone.trim(), password)
                         val session = if (register) api.accountRegister(body) else api.accountLogin(body)
-                        AccountStore.save(session, server)
+                        AccountStore.save(session, server, saved)
                     }.onSuccess { password = ""; confirmation = ""; message = "登录成功" }
                         .onFailure { message = ApiProvider.humanMessage(it) }
                     busy = false

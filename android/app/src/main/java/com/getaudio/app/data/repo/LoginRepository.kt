@@ -9,10 +9,14 @@ import com.getaudio.app.data.remote.LoginStartResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-class LoginRepository(context: Context) {
+class LoginRepository(context: Context, private val owner: AccountStore.Account) {
 
     private val settings = Settings(context)
-    private suspend fun api() = ApiProvider.api(settings.serverUrlNow(), AccountStore.forServer(settings.serverUrlNow()) ?: error("请先登录 GetAudio 账号"))
+    private suspend fun api(): com.getaudio.app.data.remote.GetAudioApi {
+        val server = settings.serverUrlNow()
+        check(accountResponseIsCurrent(owner, AccountStore.forServer(server), server)) { "账号或服务器已切换，请重试" }
+        return ApiProvider.api(owner.serverUrl, owner)
+    }
 
     suspend fun start(platform: String): Result<LoginStartResponse> = runCatching {
         withContext(Dispatchers.IO) {
@@ -51,5 +55,5 @@ class LoginRepository(context: Context) {
 
     /** 二维码图片的完整地址，交给 Coil 加载。 */
     suspend fun qrImageUrl(path: String): String =
-        settings.serverUrlNow().trimEnd('/') + path
+        owner.serverUrl.trimEnd('/') + path
 }

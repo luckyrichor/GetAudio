@@ -53,15 +53,16 @@ object AccountStore {
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { refreshVisibility(context) }
     }
 
-    suspend fun save(session: AccountSession, baseUrl: String) {
+    suspend fun save(session: AccountSession, baseUrl: String, expectedAccount: Account? = state.value) {
         val account = Account(session.userId, session.phone, session.sessionToken, baseUrl)
         val data = JSONObject().put("user_id", account.userId).put("phone", account.phone)
             .put("token", account.token).put("server", baseUrl).toString().toByteArray()
         val encrypted = encrypt(data)
         val temp = File(file.parentFile, file.name + ".tmp")
-        temp.writeBytes(encrypted)
-        check(temp.renameTo(file)) { "无法保存账号登录状态" }
         TrackRepository.fileMutex.withLock {
+            check(state.value == expectedAccount && Settings(appContext).serverUrlNow() == baseUrl) { "账号或服务器已切换，请重试" }
+            temp.writeBytes(encrypted)
+            check(temp.renameTo(file)) { "无法保存账号登录状态" }
             state.value = account
             setVisibility()
         }
@@ -81,8 +82,11 @@ object AccountStore {
         return cipher.doFinal(bytes.copyOfRange(12, bytes.size))
     }
 
-    suspend fun clear() {
-        TrackRepository.fileMutex.withLock { file.delete(); state.value = null; setVisibility() }
+    suspend fun clear(expectedAccount: Account? = state.value) {
+        TrackRepository.fileMutex.withLock {
+            check(state.value == expectedAccount) { "账号已切换，请重试" }
+            file.delete(); state.value = null; setVisibility()
+        }
         reconcileQueue()
     }
 
