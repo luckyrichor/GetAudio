@@ -88,6 +88,7 @@ object AudioEditor {
     }
 
     /** Export clips in original order to AAC/M4A, using the same clip definitions as preview. */
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     suspend fun export(context: Context, file: File, segments: List<AudioSegment>, durationMs: Long, output: File) = withContext(Dispatchers.Main) {
         val clips = validatedSegments(segments, durationMs).map {
             EditedMediaItem.Builder(clippedItem(file, it)).setRemoveVideo(true).build()

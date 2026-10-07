@@ -14,25 +14,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.getaudio.app.data.local.AppDatabase
-import com.getaudio.app.data.repo.Settings
 import com.getaudio.app.data.repo.DiagnosticsStore
-import kotlinx.coroutines.launch
 import java.io.File
 
 @Composable
 fun MyScreen(onCategories: () -> Unit) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val tracks by AppDatabase.get(context).trackDao().observeAll().collectAsState(initial = emptyList())
     var dialog by remember { mutableStateOf<String?>(null) }
     var showAccount by remember { mutableStateOf(false) }
     val account by com.getaudio.app.data.repo.AccountStore.current.collectAsState()
     var showLogin by remember { mutableStateOf(false) }
     var showAgent by remember { mutableStateOf(false) }
-    var serverUrl by remember { mutableStateOf(Settings.DEFAULT_SERVER_URL) }
-    var serverError by remember { mutableStateOf<String?>(null) }
-    var serverCheck by remember { mutableStateOf<String?>(null) }
-    var checkingServer by remember { mutableStateOf(false) }
     val version = remember { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "未知" }
     val diagnosticExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         if (uri != null) runCatching {
@@ -69,7 +62,7 @@ fun MyScreen(onCategories: () -> Unit) {
             Column { Text(account?.maskedPhone ?: "访客", style = MaterialTheme.typography.titleMedium); Text(if (account == null) "点击登录账号" else "账号管理", style = MaterialTheme.typography.bodySmall) }
         }
 
-        AreaAction(onClick = { scope.launch { serverUrl = Settings(context).serverUrlNow(); serverError = null; serverCheck = null; dialog = "server" } }) { Text("服务器设置") }
+        AreaAction(onClick = { dialog = "server" }) { Text("服务器设置") }
         AreaAction(onClick = { showLogin = true }) { Text("抖音 / B站平台登录") }
         AreaAction(onClick = onCategories) { Text("类别管理") }
         AreaAction(onClick = { dialog = "storage" }) { Text("存储空间：${bytes / 1024 / 1024} MB") }
@@ -88,39 +81,9 @@ fun MyScreen(onCategories: () -> Unit) {
             } }, confirmButton = { AreaButton(onClick = { dialog = null }) { Text("关闭") } })
         "about" -> AlertDialog(onDismissRequest = { dialog = null }, title = { Text("GetAudio $version") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("分享链接提取音频，分类、播放和管理均可在本机完成。")
-            AreaButton(onClick = { scope.launch { serverUrl = Settings(context).serverUrlNow() }; dialog = "server" }) { Text("开发者选项") }
+            AreaButton(onClick = { dialog = "server" }) { Text("开发者选项") }
         } }, confirmButton = { AreaButton(onClick = { dialog = null }) { Text("关闭") } })
-        "server" -> AlertDialog(onDismissRequest = { dialog = null }, title = { Text("服务器设置") },
-            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(serverUrl, { serverUrl = it; serverError = null; serverCheck = null }, label = { Text("服务器地址") }, singleLine = true,
-                    isError = serverError != null, supportingText = { serverError?.let { Text(it) } })
-                if (serverUrl.trimEnd('/') == Settings.DEFAULT_SERVER_URL.trimEnd('/')) Text("当前为 tx 服务器，可通过 Wi-Fi 或移动网络直接提取和同步音频。", style = MaterialTheme.typography.bodySmall)
-                if (Settings.DEFAULT_SERVER_URL.isNotBlank()) AreaButton(onClick = { serverUrl = Settings.DEFAULT_SERVER_URL; serverError = null; serverCheck = null }, tone = ActionTone.SYNC) { Text("恢复默认服务器") }
-                AreaButton(onClick = {
-                    val address = serverUrl.trim().trimEnd('/')
-                    checkingServer = true
-                    scope.launch {
-                        serverCheck = runCatching {
-                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                val request = okhttp3.Request.Builder().url("$address/health").build()
-                                com.getaudio.app.data.repo.ApiProvider.okHttp().newBuilder()
-                                    .callTimeout(10, java.util.concurrent.TimeUnit.SECONDS).build()
-                                    .newCall(request).execute().use { response ->
-                                        require(response.isSuccessful && org.json.JSONObject(response.body?.string().orEmpty()).optBoolean("ok")) { "服务器未返回正常状态" }
-                                    }
-                            }
-                            "服务器连接正常"
-                        }.getOrElse { "连接未成功，请检查地址和网络" }
-                        checkingServer = false
-                    }
-                }, enabled = !checkingServer && serverUrl.isNotBlank(), tone = ActionTone.SYNC) { Text(if (checkingServer) "检测中…" else "测试连接") }
-                serverCheck?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            } },
-            confirmButton = { AreaButton(onClick = {
-                val uri = android.net.Uri.parse(serverUrl.trim())
-                if (uri.scheme !in listOf("http", "https") || uri.host.isNullOrBlank()) serverError = "请输入有效的 http 或 https 地址"
-                else scope.launch { Settings(context).setServerUrl(serverUrl); dialog = null }
-            }, tone = ActionTone.CONFIRM) { Text("保存") } }, dismissButton = { AreaButton(onClick = { dialog = null }) { Text("取消") } })
+        "server" -> ServerSettingsDialog { dialog = null }
     }
 }
 

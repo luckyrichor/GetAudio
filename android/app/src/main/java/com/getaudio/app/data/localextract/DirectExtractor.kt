@@ -304,7 +304,16 @@ class DirectExtractor(
                 "手机暂不支持抽取此视频的音频编码"
             }
             extractor.selectTrack(audio)
-            require(extractor.sampleTime >= 0) { "音轨没有可读取的数据" }
+            val delay = if (format.containsKey(MediaFormat.KEY_ENCODER_DELAY)) format.getInteger(MediaFormat.KEY_ENCODER_DELAY) else 0
+            if (hasDeclaredAudioPreroll(extractor.sampleTime, delay)) {
+                // Seek only when the source explicitly marks encoder priming; never drop a fixed number of AAC frames.
+                extractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                if (extractor.sampleTime >= 0) format.setInteger(MediaFormat.KEY_ENCODER_DELAY, 0)
+            }
+            val buffer = ByteBuffer.allocateDirect(2 * 1024 * 1024)
+            require(extractor.readSampleData(buffer, 0) >= 0) { "音轨没有可读取的数据" }
+            // Undeclared negative timestamps are retained, with a common offset to satisfy MediaMuxer.
+            val timeOffset = if (extractor.sampleTime < 0) -extractor.sampleTime else 0L
             // 创建封装器前检查首帧，避免 stop() 的空文件错误覆盖明确的失败原因。
             muxerSampleFlags(extractor.sampleFlags)
             val muxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
@@ -313,13 +322,12 @@ class DirectExtractor(
                 val outTrack = muxer.addTrack(format)
                 muxer.start()
                 started = true
-                val buffer = ByteBuffer.allocateDirect(2 * 1024 * 1024)
                 val info = MediaCodec.BufferInfo()
                 while (true) {
                     buffer.clear()
                     val size = extractor.readSampleData(buffer, 0)
                     if (size < 0) break
-                    info.set(0, size, extractor.sampleTime, muxerSampleFlags(extractor.sampleFlags))
+                    info.set(0, size, extractor.sampleTime + timeOffset, muxerSampleFlags(extractor.sampleFlags))
                     muxer.writeSampleData(outTrack, buffer, info)
                     extractor.advance()
                 }

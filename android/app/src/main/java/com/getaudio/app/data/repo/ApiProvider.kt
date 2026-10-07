@@ -33,11 +33,40 @@ object ApiProvider {
     /** Provisioned privately on the device, never bundled in the APK or diagnostics. */
     fun initialize(context: Context) {
         AccountStore.initialize(context)
-        serverAuthorization = runCatching {
-            val file = File(context.filesDir, "server-access.json")
-            if (!file.exists()) null else JSONObject(file.readText()).getString("authorization")
-                .takeIf { it.startsWith("Basic ") && !it.contains('\n') && !it.contains('\r') }
-        }.getOrNull()
+        serverAuthorization = accessStore(context).authorization()
+    }
+
+    private fun accessStore(context: Context) = ServerAccessStore(File(context.filesDir, "server-access.json"))
+    fun serverUsername(context: Context): String = accessStore(context).username().ifBlank { "lck80" }
+    fun hasServerAccess(context: Context): Boolean = accessStore(context).authorization() != null
+
+    /** Candidate credentials are sent only to the configured production HTTPS origin. */
+    fun testServerAccess(context: Context, address: String, username: String, password: String, save: Boolean): String {
+        val origin = address.trim().trimEnd('/').toHttpUrl()
+        val production = isCredentialOrigin(origin, credentialOrigin)
+        require(origin.encodedPath == "/" && origin.query == null && origin.fragment == null) { "服务器地址请填写根地址" }
+        val testClient = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
+            .callTimeout(15, TimeUnit.SECONDS).build()
+        fun verify(auth: String?) {
+            val request = okhttp3.Request.Builder().url(origin.newBuilder().addPathSegment("sync").addQueryParameter("limit", "1").build())
+            auth?.let { request.header("Authorization", it) }
+            testClient.newCall(request.build()).execute().use { response ->
+                require(response.code != 401) { "服务器授权失败，请检查用户名和密码" }
+                require(response.isSuccessful) { "服务器检查失败：HTTP ${response.code}" }
+                require(JSONObject(response.body?.string().orEmpty()).has("items")) { "服务器未返回有效同步结果" }
+            }
+        }
+        if (production) {
+            val store = accessStore(context)
+            if (save) {
+                store.saveValidated(username, password) { verify(it) }
+                serverAuthorization = store.authorization()
+            } else verify(store.candidate(username, password))
+            return "服务器连接及访问授权正常"
+        }
+        require(password.isEmpty()) { "服务器访问凭据仅用于 tx 的 HTTPS 地址" }
+        verify(null)
+        return "服务器连接正常（未发送 tx 访问凭据）"
     }
 
     private val client = OkHttpClient.Builder()
