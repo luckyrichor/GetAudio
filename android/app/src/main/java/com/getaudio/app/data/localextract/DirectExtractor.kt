@@ -207,10 +207,17 @@ class DirectExtractor(
 
     private suspend fun bilibili(link: DirectLink): Media {
         report("B 站：开始请求作品与音轨信息")
-        get("https://www.bilibili.com/", ua = BROWSER_UA)
-        get("https://api.bilibili.com/x/frontend/finger/spi", ua = BROWSER_UA)
+        for ((name, url) in listOf("首页预热" to "https://www.bilibili.com/",
+            "访客预热" to "https://api.bilibili.com/x/frontend/finger/spi")) {
+            withOptionalBilibiliWarmup(
+                warmup = { get(url, ua = BROWSER_UA, stage = "B 站$name"); report("B 站$name：成功") },
+                onFailure = { report("B 站$name：${failureKind(it)}，继续请求作品接口") },
+                required = {},
+            )
+        }
         val param = if (link.videoId.startsWith("av", true)) "aid=${link.videoId.drop(2)}" else "bvid=${link.videoId}"
-        val view = JSONObject(get("https://api.bilibili.com/x/web-interface/view?$param", referer = link.url))
+        val view = JSONObject(get("https://api.bilibili.com/x/web-interface/view?$param", referer = link.url, stage = "B 站作品信息"))
+        report("B 站作品信息：HTTP 200")
         require(view.optInt("code") == 0) { "B 站作品不可访问：${view.optString("message")}" }
         val item = view.getJSONObject("data")
         val pages = item.optJSONArray("pages")
@@ -218,7 +225,7 @@ class DirectExtractor(
         val cid = pages?.optJSONObject(link.page - 1)?.optLong("cid")?.takeIf { it > 0 }
             ?: item.optLong("cid")
         require(cid > 0) { "B 站没有返回视频分 P 编号" }
-        val nav = JSONObject(get("https://api.bilibili.com/x/web-interface/nav", referer = link.url))
+        val nav = JSONObject(get("https://api.bilibili.com/x/web-interface/nav", referer = link.url, stage = "B 站播放签名"))
         val wbi = nav.getJSONObject("data").getJSONObject("wbi_img")
         val key = mixinKey(wbi.getString("img_url"), wbi.getString("sub_url"))
         val params = sortedMapOf(
@@ -229,7 +236,14 @@ class DirectExtractor(
         val query = params.entries.joinToString("&") { "${it.key}=${it.value}" }
         val signature = MessageDigest.getInstance("MD5").digest((query + key).toByteArray())
             .joinToString("") { "%02x".format(it) }
-        val play = JSONObject(get("https://api.bilibili.com/x/player/wbi/playurl?$query&w_rid=$signature", referer = link.url))
+        val playUrl = "https://api.bilibili.com/x/player/wbi/playurl?$query&w_rid=$signature"
+        val play = try {
+            JSONObject(get(playUrl, referer = link.url, stage = "B 站播放地址"))
+        } catch (error: PlatformHttpException) {
+            if (!shouldUseBilibiliBrowser(error.code)) throw error
+            report("B 站播放地址：HTTP 412，尝试浏览器请求同一音轨")
+            BilibiliBrowserAudio.fetch(context, link.url, playUrl, BROWSER_UA, report)
+        }
         require(play.optInt("code") == 0) { "B 站没有返回播放地址：${play.optString("message")}" }
         val audio = play.getJSONObject("data").getJSONObject("dash").getJSONArray("audio")
         val track = (0 until audio.length()).map { audio.getJSONObject(it) }
