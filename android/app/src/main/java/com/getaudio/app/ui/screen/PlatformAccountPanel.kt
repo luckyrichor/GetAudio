@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import com.getaudio.app.data.remote.*
 import com.getaudio.app.data.repo.AccountStore
 import com.getaudio.app.data.repo.ApiProvider
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -22,6 +23,15 @@ import kotlinx.coroutines.withContext
 
 @Composable
 fun PlatformAccountPanel(server: String, account: AccountStore.Account?, expectedSaved: AccountStore.Account?) {
+    val problem = when {
+        server.isBlank() -> "正在读取服务器设置，请稍候；如未配置，请到服务器设置中填写 HTTPS 地址。"
+        server.toHttpUrlOrNull() == null -> "服务器地址无效，请在服务器设置中修改。"
+        else -> runCatching { AccountStore.requireSecureServer(server) }.exceptionOrNull()?.message
+    }
+    if (problem != null) {
+        Text(problem, style = MaterialTheme.typography.bodySmall)
+        return
+    }
     key(server, account?.token) { PlatformAccountPanelContent(server, account, expectedSaved) }
 }
 

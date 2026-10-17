@@ -22,8 +22,7 @@ fun AccountScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val saved by AccountStore.current.collectAsState()
-    var server by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) { server = Settings(context).serverUrlNow() }
+    val server by remember(context) { Settings(context).serverUrl }.collectAsState(initial = "")
     val account = saved?.takeIf { it.serverUrl == server }
     var phone by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
