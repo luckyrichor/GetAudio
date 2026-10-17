@@ -304,6 +304,60 @@ object PlayerHolder {
         queueState.value = updated
     }
 
+    private fun hasLiveQueue(): Boolean = queueState.value.isNotEmpty() &&
+        controller?.let { it.isConnected && it.mediaItemCount > 0 } == true
+
+    /** Cold start: recover cached, currently visible references, without network or autoplay. */
+    suspend fun restore(context: Context) {
+        if (hasLiveQueue()) return
+        com.getaudio.app.data.repo.AccountStore.refreshVisibility(context)
+        val account = com.getaudio.app.data.repo.AccountStore.current.value
+        val settings = com.getaudio.app.data.repo.Settings(context)
+        val server = settings.serverUrlNow()
+        appendMutex.withLock {
+            if (hasLiveQueue()) return@withLock
+            val memory = PlaybackMemory(context)
+            val saved = memory.read()
+            val lists = PlaylistRepository(context)
+            val source = saved?.playlistId ?: lists.defaultId() ?: return@withLock
+            val restored = lists.tracks(source).mapNotNull { track ->
+                val path = track.localPath?.takeIf { File(it).isFile && File(it).length() > 0 }
+                path?.let { QueueItem(track, it) }
+            }.distinctBy { it.track.id }
+            if (server != settings.serverUrlNow() || account != com.getaudio.app.data.repo.AccountStore.current.value) return@withLock
+            if (restored.isEmpty()) {
+                memory.save(null)
+                queueState.value = emptyList()
+                indexState.value = 0
+                playingState.value = false
+                controller?.takeIf { it.isConnected }?.run { stop(); clearMediaItems() }
+                cancelTimer()
+                return@withLock
+            }
+            val savedTrack = restored.firstOrNull { it.track.id == saved?.trackId }?.track
+            val duration = savedTrack?.durationSec?.takeIf { it.isFinite() && it > 0 }?.times(1000)?.toLong()
+            val point = saved?.resumePoint(restored.map { it.track.id }, duration) ?: ResumePoint(0, 0)
+            val player = get(context)
+            // An account can change while the controller connects; never restore its hidden tracks.
+            if (server != settings.serverUrlNow() || account != com.getaudio.app.data.repo.AccountStore.current.value) return@withLock
+            sourcePlaylistIdState.value = source
+            modeState.value = Mode.entries.firstOrNull { it.name == saved?.mode } ?: Mode.ORDERED
+            queueState.value = restored
+            indexState.value = point.index
+            playingState.value = false
+            player.playWhenReady = false
+            player.setMediaItems(restored.map(::mediaItem), point.index, point.positionMs)
+            player.prepare()
+            applyMode(context)
+        }
+    }
+
+    fun savePlayback(context: Context, synchronous: Boolean = false) {
+        controller?.takeIf { it.isConnected }?.let { player ->
+            playbackSnapshot(player)?.let { PlaybackMemory(context).save(it, synchronous) }
+        }
+    }
+
     suspend fun toggle(context: Context) {
         get(context).run { if (isPlaying) pause() else play() }
     }

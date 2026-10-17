@@ -25,6 +25,8 @@ class PlaylistRepository(context: Context) {
 
     suspend fun resolve(id: Long?): Long = id?.takeIf { dao.byId(it) != null } ?: ensureDefault()
 
+    suspend fun defaultId(): Long? = dao.firstId()
+
     suspend fun tracks(id: Long) = dao.itemsNow(id).mapNotNull { db.trackDao().byId(it.trackId) }
 
     suspend fun replaceTracks(id: Long, trackIds: List<Long>) = db.withTransaction {

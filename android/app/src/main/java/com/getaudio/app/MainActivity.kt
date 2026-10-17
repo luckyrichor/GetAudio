@@ -3,6 +3,10 @@ package com.getaudio.app
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import com.getaudio.app.player.PlayerHolder
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
@@ -74,6 +78,22 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        lifecycleScope.launch {
+            try { PlayerHolder.restore(applicationContext) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                com.getaudio.app.data.repo.DiagnosticsStore.event("恢复播放", "播放状态恢复失败，可手动选择音频", false)
+            }
+        }
+    }
+
+    override fun onStop() {
+        PlayerHolder.savePlayback(applicationContext, synchronous = true)
+        super.onStop()
     }
 
     private fun sharedText(intent: Intent?): String? =
