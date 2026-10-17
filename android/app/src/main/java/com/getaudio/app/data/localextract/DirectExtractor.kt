@@ -188,7 +188,7 @@ class DirectExtractor(
         val music = detail.optJSONObject("music")
         val videoSeconds = detail.optDouble("duration", 0.0) / 1000.0
         val musicSeconds = music?.optDouble("duration", 0.0) ?: 0.0
-        val musicUrls = urls(music?.optJSONObject("play_url"))
+        val musicUrls = (urls(music?.optJSONObject("play_url")) + douyinNoteAudioUrls(detail)).distinct()
         val videoUrls = listOf("play_addr_h264", "play_addr_265", "play_addr", "download_addr")
             .flatMap { urls(video?.optJSONObject(it)) } +
             (video?.optJSONArray("bit_rate")?.let { arr ->
