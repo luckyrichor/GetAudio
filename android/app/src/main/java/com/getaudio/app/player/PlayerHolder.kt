@@ -206,8 +206,29 @@ object PlayerHolder {
         indexState.value = index
     }
 
-    suspend fun remove(context: Context, index: Int) {
-        if (index !in queueState.value.indices) return
+    /** Move existing Media3 items: the current song, position and paused/playing state survive. */
+    suspend fun reorder(context: Context, playlistId: Long?, trackIds: List<Long>): Boolean = appendMutex.withLock {
+        if (playlistId == null || playlistId != sourcePlaylistIdState.value) return@withLock false
+        val original = queueState.value
+        val moves = queueReorderMoves(original.map { it.track.id }, trackIds) ?: return@withLock false
+        val player = get(context)
+        if (player.mediaItemCount != original.size || original.indices.any {
+            player.getMediaItemAt(it).mediaId != original[it].track.id.toString()
+        }) return@withLock false
+        // Once the transaction starts, finish applying it even if the dialog is dismissed.
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            if (!PlaylistRepository(context).reorder(playlistId, trackIds)) return@withContext false
+            moves.forEach { (from, to) -> player.moveMediaItem(from, to) }
+            // A concurrent rename may have refreshed metadata while Room was saving.
+            val byId = queueState.value.associateBy { it.track.id }
+            queueState.value = trackIds.map { byId.getValue(it) }
+            indexState.value = player.currentMediaItemIndex.coerceAtLeast(0)
+            true
+        }
+    }
+
+    suspend fun remove(context: Context, index: Int) = appendMutex.withLock {
+        if (index !in queueState.value.indices) return@withLock
         val removed = queueState.value[index]
         sourcePlaylistIdState.value?.let { PlaylistRepository(context).removeTrack(it, removed.track.id) }
         get(context).removeMediaItem(index)

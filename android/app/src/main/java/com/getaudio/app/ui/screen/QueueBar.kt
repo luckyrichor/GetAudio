@@ -2,8 +2,6 @@ package com.getaudio.app.ui.screen
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Pause
@@ -68,24 +66,19 @@ fun QueueBar() {
             AreaButton(onClick = { PlayerHolder.cancelTimer() }, tone = ActionTone.TIMER) { Text("取消定时") }
         }
     } },
-        text = { LazyColumn(Modifier.heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            itemsIndexed(queue) { i, item ->
-                val isCurrent = i == index
-                Row(Modifier.fillMaxWidth().regionFrame(isCurrent).padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("${i + 1}", modifier = Modifier.widthIn(min = 24.dp).padding(end = 8.dp),
-                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(item.track.title, modifier = Modifier.weight(1f), maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-                    IconButton(onClick = { scope.launch {
-                        if (isCurrent) PlayerHolder.toggle(context) else PlayerHolder.jump(context, i)
-                    } }) {
-                        Icon(if (isCurrent && playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            if (isCurrent && playing) "暂停第${i + 1}个音频" else "播放第${i + 1}个音频",
-                            tint = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-                    }
-                    AreaButton(onClick = { scope.launch { PlayerHolder.remove(context, i) } }, tone = ActionTone.DESTRUCTIVE) { Text("移除") }
+        text = { ReorderableQueue(
+            queue = queue, currentId = queue.getOrNull(index)?.track?.id, playing = playing,
+            onReorder = { ids -> PlayerHolder.reorder(context, sourceId, ids) },
+            onPlay = { id -> scope.launch {
+                val position = PlayerHolder.queue.value.indexOfFirst { it.track.id == id }
+                if (position >= 0) {
+                    if (position == PlayerHolder.currentIndex.value) PlayerHolder.toggle(context)
+                    else PlayerHolder.jump(context, position)
                 }
-            }
-        } }, confirmButton = { AreaButton(onClick = { showQueue = false }) { Text("关闭") } })
+            } },
+            onRemove = { id -> scope.launch {
+                val position = PlayerHolder.queue.value.indexOfFirst { it.track.id == id }
+                if (position >= 0) PlayerHolder.remove(context, position)
+            } },
+        ) }, confirmButton = { AreaButton(onClick = { showQueue = false }) { Text("关闭") } })
 }
