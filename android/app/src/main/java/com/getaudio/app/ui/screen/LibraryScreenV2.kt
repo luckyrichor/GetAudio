@@ -67,7 +67,7 @@ private sealed interface LibraryTarget {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun LibraryScreenV2(openCategories: Boolean = false) {
+fun LibraryScreenV2(openCategories: Boolean = false, onBackgroundOnly: () -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val db = remember { AppDatabase.get(context) }
@@ -261,6 +261,13 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
                         AreaButton(onClick = { PlayerHolder.cancelTimer(); notice = "已取消定时播放" }, tone = ActionTone.TIMER) {
                             Text("取消定时播放")
                         }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    // 只留背景：隐藏列表和底部导航，专心看壁纸。
+                    AreaButton(onClick = onBackgroundOnly) {
+                        Icon(Icons.Default.Wallpaper, null, Modifier.size(15.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("只看背景")
                     }
                 }
                 if (startMs != null || endTimeMs != null) {
