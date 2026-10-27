@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.getaudio.app.ui.components.BackgroundLayer
 import com.getaudio.app.ui.components.LocalBackgroundEnabled
+import com.getaudio.app.ui.components.LocalCardAlpha
 import com.getaudio.app.ui.screen.ExtractScreen
 import com.getaudio.app.ui.screen.LibraryScreenV2
 import com.getaudio.app.ui.screen.MyScreen
@@ -77,7 +78,10 @@ class MainActivity : ComponentActivity() {
                 }
 
                 // 背景图铺在最底层，页面自己让出底色，卡片保持不透明以保证可读性。
-                CompositionLocalProvider(LocalBackgroundEnabled provides background.enabled) {
+                CompositionLocalProvider(
+                    LocalBackgroundEnabled provides background.enabled,
+                    LocalCardAlpha provides background.cardAlpha,
+                ) {
                     Box(Modifier.fillMaxSize()) {
                         BackgroundLayer()
                         if (bgOnly) {
