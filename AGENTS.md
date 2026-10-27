@@ -108,3 +108,11 @@ sh android/gradlew -p android testDebugUnitTest lintDebug assembleDebug assemble
 - 2026-10-27：额度中断后继续，重新核对手机0.8.7、tx服务active及飞书记录/目录；补齐最终验收状态、概览和开发记录链接。仅文档收尾，未改功能代码，未重跑已通过的测试。
 
 - 2026-10-26：定位当前图文失败为真实 MP3 位于新增 bucket；补兼容和测试。实现失败报告私有暂存、鉴权上传、去重留存与只读查询；补齐 AGENTS 唯一正文，新增 CLAUDE 引用。75 项 Android / 164 项 tx 测试通过，手机入库与服务器上报已验证，GitHub、tx 与飞书交付完成。
+
+## Android 发布签名（强制）
+
+- `release` 包**必须**用 `~/.android-keys/getaudio.properties` 指向的固定证书签名，证书 SHA-256 `9DA16F85…443F50C5`（`CN=GetAudio`）。
+- 换机器 / 换 Agent 环境首次构建前先跑 `scripts/setup-release-key.sh`（从 `tx:~/.app-keys/` 拉取）。
+- `build.gradle.kts` 找不到密钥会**直接构建失败**，这是刻意设计：绝不产出签名不同的 release APK（装了会撞 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`）。仅在明确不发布时用 `-PallowDebugSignRelease=true` 绕过。
+- 密钥文件（`*.jks` / `*.keystore` / `android/keystore.properties`）**绝不入库**。
+- 详见 `docs/android-release-signing.md`。
