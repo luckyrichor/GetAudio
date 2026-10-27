@@ -6,6 +6,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.TimerOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -57,16 +59,24 @@ fun QueueBar() {
     }
     if (showTimer) TimerDialog(onClose = { showTimer = false })
     if (showMode) PlaybackModeDialog(onClose = { showMode = false })
-    if (showQueue) AlertDialog(onDismissRequest = { showQueue = false }, title = { Column {
-        Text(listName)
-        Text("共 ${queue.size} 个文件", style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
-        if (timer != null) Row(verticalAlignment = Alignment.CenterVertically) {
-            AreaButton(onClick = { showTimer = true }, tone = ActionTone.TIMER) { Text("定时停止 $timer") }
-            AreaButton(onClick = { PlayerHolder.cancelTimer() }, tone = ActionTone.TIMER) { Text("取消定时") }
-        }
-    } },
-        text = { ReorderableQueue(
+    if (showQueue) MusicSheet(
+        title = listName,
+        onDismiss = { showQueue = false },
+        subtitle = if (timer != null) "定时停止：$timer" else "长按拖动调整播放顺序",
+        badge = if (queue.size == 1) "1 首" else "${queue.size} 首",
+        scroll = false,
+        confirmText = "完成",
+        onConfirm = { showQueue = false },
+        header = if (timer != null) {
+            {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SheetPill("查看定时", Icons.Default.Timer, { showQueue = false; showTimer = true })
+                    SheetPill("取消定时", Icons.Default.TimerOff, { PlayerHolder.cancelTimer() })
+                }
+            }
+        } else null,
+    ) {
+        ReorderableQueue(
             queue = queue, currentId = queue.getOrNull(index)?.track?.id, playing = playing,
             onReorder = { ids -> PlayerHolder.reorder(context, sourceId, ids) },
             onPlay = { id -> scope.launch {
@@ -80,5 +90,6 @@ fun QueueBar() {
                 val position = PlayerHolder.queue.value.indexOfFirst { it.track.id == id }
                 if (position >= 0) PlayerHolder.remove(context, position)
             } },
-        ) }, confirmButton = { AreaButton(onClick = { showQueue = false }) { Text("关闭") } })
+        )
+    }
 }

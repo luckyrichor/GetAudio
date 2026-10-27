@@ -71,6 +71,7 @@ class DirectExtractor(
                 id = id, platform = link.platform, videoId = link.key,
                 title = media.title, uploader = media.uploader,
                 durationSec = duration(dest), audioBytes = dest.length(),
+                coverUrl = media.coverUrl,
                 audioFormat = format,
                 sourceUrl = link.url, downloadUrl = "", updatedSeq = System.currentTimeMillis(),
                 audioSha256 = hash, localPath = dest.absolutePath,
@@ -84,7 +85,7 @@ class DirectExtractor(
 
     private data class Media(
         val title: String, val uploader: String?, val urls: List<String>,
-        val referer: String,
+        val referer: String, val coverUrl: String? = null,
     )
 
     private suspend fun resolve(text: String): DirectLink {
@@ -118,14 +119,14 @@ class DirectExtractor(
         }
         val token = ByteArray(81).also(SecureRandom()::nextBytes)
         val msToken = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(token)
-        cookies.put("douyin.com", "msToken", msToken)
+        cookies.put("www.douyin.com", "msToken", msToken)
         val body = """{"region":"cn","aid":1768,"needFid":false,"service":"www.ixigua.com","migrate_info":{"ticket":"","source":"node"},"cbUrlProtocol":"https","union":true}"""
         try {
             val request = Request.Builder().url("https://ttwid.bytedance.com/ttwid/union/register/")
                 .header("User-Agent", ua).post(body.toRequestBody("application/json".toMediaType())).build()
             client.newCall(request).execute().use { response ->
                 Cookie.parseAll(response.request.url, response.headers)
-                    .firstOrNull { it.name == "ttwid" }?.let { cookies.put("douyin.com", "ttwid", it.value) }
+                    .firstOrNull { it.name == "ttwid" }?.let { cookies.put("www.douyin.com", "ttwid", it.value) }
                 report("访客凭证：HTTP ${response.code}，ttwid ${if (cookies.has("ttwid")) "已取得" else "未取得"}")
             }
         } catch (e: Exception) {
@@ -201,22 +202,22 @@ class DirectExtractor(
         require(selected.isNotEmpty()) { "抖音没有返回可下载地址" }
         val title = music?.optString("title")?.takeIf(String::isNotBlank)
             ?: detail.optString("desc").take(60).ifBlank { "抖音 ${link.videoId}" }
+        val cover = video?.optJSONObject("cover")?.optJSONArray("url_list")?.optString(0)?.takeIf(String::isNotBlank)
+            ?: video?.optJSONObject("origin_cover")?.optJSONArray("url_list")?.optString(0)?.takeIf(String::isNotBlank)
         return Media(title, detail.optJSONObject("author")?.optString("nickname"),
-            selected.distinct(), referer)
+            selected.distinct(), referer, cover)
     }
 
     private suspend fun bilibili(link: DirectLink): Media {
         report("B 站：开始请求作品与音轨信息")
-        for ((name, url) in listOf("首页预热" to "https://www.bilibili.com/",
-            "访客预热" to "https://api.bilibili.com/x/frontend/finger/spi")) {
-            withOptionalBilibiliWarmup(
-                warmup = { get(url, ua = BROWSER_UA, stage = "B 站$name"); report("B 站$name：成功") },
-                onFailure = { report("B 站$name：${failureKind(it)}，继续请求作品接口") },
-                required = {},
-            )
-        }
+        withOptionalBilibiliWarmup(
+            warmup = { get("https://www.bilibili.com/", ua = BROWSER_UA, stage = "B 站首页预热"); report("B 站首页预热：成功") },
+            onFailure = { report("B 站首页预热：${failureKind(it)}，继续请求作品接口") },
+            required = {},
+        )
+        report("B 站：访客凭证 ${if (refreshBiliCredentials(link.url)) "已取得" else "未取得"}")
         val param = if (link.videoId.startsWith("av", true)) "aid=${link.videoId.drop(2)}" else "bvid=${link.videoId}"
-        val view = JSONObject(get("https://api.bilibili.com/x/web-interface/view?$param", referer = link.url, stage = "B 站作品信息"))
+        val view = JSONObject(biliGet("https://api.bilibili.com/x/web-interface/view?$param", "B 站作品信息", link.url))
         report("B 站作品信息：HTTP 200")
         require(view.optInt("code") == 0) { "B 站作品不可访问：${view.optString("message")}" }
         val item = view.getJSONObject("data")
@@ -225,7 +226,7 @@ class DirectExtractor(
         val cid = pages?.optJSONObject(link.page - 1)?.optLong("cid")?.takeIf { it > 0 }
             ?: item.optLong("cid")
         require(cid > 0) { "B 站没有返回视频分 P 编号" }
-        val nav = JSONObject(get("https://api.bilibili.com/x/web-interface/nav", referer = link.url, stage = "B 站播放签名"))
+        val nav = JSONObject(biliGet("https://api.bilibili.com/x/web-interface/nav", "B 站播放签名", link.url))
         val wbi = nav.getJSONObject("data").getJSONObject("wbi_img")
         val key = mixinKey(wbi.getString("img_url"), wbi.getString("sub_url"))
         val params = sortedMapOf(
@@ -238,7 +239,7 @@ class DirectExtractor(
             .joinToString("") { "%02x".format(it) }
         val playUrl = "https://api.bilibili.com/x/player/wbi/playurl?$query&w_rid=$signature"
         val play = try {
-            JSONObject(get(playUrl, referer = link.url, stage = "B 站播放地址"))
+            JSONObject(biliGet(playUrl, "B 站播放地址", link.url))
         } catch (error: PlatformHttpException) {
             if (!shouldUseBilibiliBrowser(error.code)) throw error
             report("B 站播放地址：HTTP 412，尝试浏览器请求同一音轨")
@@ -254,15 +255,64 @@ class DirectExtractor(
         val part = pages?.optJSONObject(link.page - 1)?.optString("part").orEmpty()
         val title = item.optString("title").ifBlank { "B 站 ${link.videoId}" } +
             if (link.page > 1) " - P${link.page} $part" else ""
+        // 封面可能是协议相对或 http 地址，统一转 https 以便直接加载。
+        val cover = item.optString("pic").takeIf(String::isNotBlank)?.let {
+            when {
+                it.startsWith("//") -> "https:$it"
+                it.startsWith("http://") -> "https://" + it.removePrefix("http://")
+                else -> it
+            }
+        }
         return Media(title, item.optJSONObject("owner")?.optString("name"), selected,
-            "https://www.bilibili.com/")
+            "https://www.bilibili.com/", cover)
     }
 
-    private fun get(url: String, ua: String = BROWSER_UA, referer: String? = null, stage: String = "平台"): String {
+    /**
+     * 取 buvid3/buvid4 写进 Cookie。缺这两个值时 api.bilibili.com 极易返回 412，
+     * 而 spi 接口本身几乎不会被拦，所以它是 B 站链路最可靠的起点。
+     */
+    private fun refreshBiliCredentials(referer: String?): Boolean {
+        val body = runCatching {
+            get(
+                "https://api.bilibili.com/x/frontend/finger/spi",
+                referer = referer, origin = "https://www.bilibili.com", stage = "B 站访客凭证",
+            )
+        }.getOrNull() ?: return cookies.has("buvid3")
+        val data = runCatching { JSONObject(body).optJSONObject("data") }.getOrNull() ?: return cookies.has("buvid3")
+        val buvid3 = data.optString("b_3").takeIf(String::isNotBlank)
+        val buvid4 = data.optString("b_4").takeIf(String::isNotBlank)
+        listOf("api.bilibili.com", "www.bilibili.com").forEach { host ->
+            buvid3?.let { cookies.put(host, "buvid3", it) }
+            buvid4?.let { cookies.put(host, "buvid4", it) }
+        }
+        return cookies.has("buvid3")
+    }
+
+    /** B 站接口对凭证敏感，412 时刷新一次访客凭证再重试，避免一次风控就整条链路失败。 */
+    private suspend fun biliGet(url: String, stage: String, referer: String): String = try {
+        get(url, referer = referer, origin = "https://www.bilibili.com", stage = stage)
+    } catch (e: PlatformHttpException) {
+        if (e.code != 412) throw e
+        report("$stage：HTTP 412，刷新访客凭证后重试")
+        delay(500)
+        refreshBiliCredentials(referer)
+        get(url, referer = referer, origin = "https://www.bilibili.com", stage = stage)
+    }
+
+    private fun get(
+        url: String, ua: String = BROWSER_UA, referer: String? = null, origin: String? = null,
+        stage: String = "平台",
+    ): String {
         val builder = Request.Builder().url(url).header("User-Agent", ua)
             .header("Accept", "application/json, text/plain, */*")
-            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+            .header("Accept-Language", ACCEPT_LANGUAGE)
         if (referer != null) builder.header("Referer", referer)
+        if (origin != null) {
+            builder.header("Origin", origin)
+                .header("Sec-Fetch-Site", "same-site")
+                .header("Sec-Fetch-Mode", "cors")
+                .header("Sec-Fetch-Dest", "empty")
+        }
         client.newCall(builder.build()).execute().use { response ->
             if (!response.isSuccessful) throw PlatformHttpException(stage, response.code)
             return response.body?.string() ?: error("平台返回空内容")
@@ -399,13 +449,16 @@ class DirectExtractor(
         }
         @Synchronized override fun loadForRequest(url: HttpUrl): List<Cookie> = jar.filter { it.matches(url) }
         fun put(domain: String, name: String, value: String) {
-            val cookie = Cookie.Builder().name(name).value(value).domain(domain).build()
-            saveFromResponse("https://$domain".toHttpUrlOrNull()!!, listOf(cookie))
+            // OkHttp 不接受 ".bilibili.com" 这类带点前缀的域，逐个具体 host 写入即可覆盖子域。
+            val host = domain.trimStart('.')
+            val cookie = Cookie.Builder().name(name).value(value).domain(host).build()
+            saveFromResponse("https://$host".toHttpUrlOrNull()!!, listOf(cookie))
         }
         @Synchronized fun has(name: String): Boolean = jar.any { it.name == name }
     }
 
     companion object {
+        private const val ACCEPT_LANGUAGE = "zh-CN,zh;q=0.9,en;q=0.8"
         private const val BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         private const val MOBILE_UA = "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
         private val MIXIN_TABLE = intArrayOf(

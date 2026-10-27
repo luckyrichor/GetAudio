@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -19,11 +20,24 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+/** 菜单强调色：统一跟随主题主色，避免与「我的」页面的紫色体系割裂。 */
 @Composable
-internal fun musicAccent(): Color = if (MaterialTheme.colorScheme.surface.luminance() < 0.5f)
-    Color(0xFF8DC4FF) else Color(0xFF1268D3)
+internal fun musicAccent(): Color = MaterialTheme.colorScheme.primary
 
-/** Music controls use one accent; typography and icon shapes distinguish each action. */
+/** 菜单分组小标题。 */
+@Composable
+internal fun MusicMenuSection(text: String) {
+    Text(
+        text,
+        Modifier.fillMaxWidth().padding(start = 10.dp, top = 10.dp, bottom = 4.dp),
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        letterSpacing = 0.4.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+    )
+}
+
+/** 菜单项：无边框行 + 图标底托，靠分组和字重区分层级，而不是给每项描边。 */
 @Composable
 internal fun MusicMenuAction(
     title: String,
@@ -35,20 +49,47 @@ internal fun MusicMenuAction(
 ) {
     val colors = MaterialTheme.colorScheme
     val accent = if (destructive) colors.error else musicAccent()
-    Surface(onClick = onClick, shape = RoundedCornerShape(12.dp),
-        color = if (featured) accent.copy(alpha = 0.08f) else colors.surface,
-        border = BorderStroke(1.dp, if (featured) accent.copy(alpha = 0.22f) else colors.outlineVariant.copy(alpha = 0.65f)),
-        modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 12.dp).heightIn(min = 28.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Icon(icon, null, Modifier.size(23.dp), tint = accent)
-            Text(title, Modifier.weight(1f), fontSize = 15.sp, lineHeight = 21.sp,
-                fontWeight = if (featured) FontWeight.SemiBold else FontWeight.Medium,
-                color = if (destructive) colors.error else colors.onSurface)
-            if (status != null) Text(status, Modifier.widthIn(max = 90.dp), maxLines = 2,
-                overflow = TextOverflow.Ellipsis, fontSize = 12.sp, lineHeight = 16.sp,
-                color = if (featured) accent else colors.onSurfaceVariant)
-            else if (!destructive) Icon(Icons.Default.ChevronRight, null, Modifier.size(16.dp), tint = colors.onSurfaceVariant)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (featured) accent.copy(alpha = 0.09f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(11.dp),
+    ) {
+        Box(
+            Modifier.size(30.dp).clip(RoundedCornerShape(9.dp)).background(accent.copy(alpha = 0.11f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, Modifier.size(17.dp), tint = accent)
+        }
+        Text(
+            title,
+            Modifier.weight(1f),
+            fontSize = 15.sp,
+            lineHeight = 20.sp,
+            fontWeight = if (featured) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (destructive) colors.error else colors.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (status != null) {
+            Text(
+                status,
+                Modifier.widthIn(max = 96.dp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontSize = 12.sp,
+                color = if (featured) accent else colors.onSurfaceVariant.copy(alpha = 0.85f),
+            )
+        }
+        if (!destructive && status == null) {
+            Icon(
+                Icons.Default.ChevronRight, null, Modifier.size(16.dp),
+                tint = colors.onSurfaceVariant.copy(alpha = 0.45f),
+            )
         }
     }
 }
@@ -83,8 +124,9 @@ internal fun MusicPlaylistCard(
 ) {
     val colors = MaterialTheme.colorScheme
     val accent = musicAccent()
-    Surface(shape = RoundedCornerShape(14.dp), color = colors.surface,
+    Surface(shape = RoundedCornerShape(16.dp), color = colors.surface,
         border = BorderStroke(1.dp, if (current) accent.copy(alpha = 0.5f) else colors.outlineVariant),
+        shadowElevation = 1.dp,
         modifier = Modifier.fillMaxWidth()) {
         Column {
             Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(12.dp),

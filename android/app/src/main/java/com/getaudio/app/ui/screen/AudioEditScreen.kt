@@ -1,20 +1,35 @@
 package com.getaudio.app.ui.screen
 
 import android.net.Uri
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayCircleOutline
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.media3.common.MediaItem
@@ -23,6 +38,10 @@ import com.getaudio.app.audioedit.*
 import com.getaudio.app.data.local.TrackEntity
 import com.getaudio.app.data.repo.TrackRepository
 import com.getaudio.app.player.PlayerHolder
+import com.getaudio.app.ui.components.uiAccentContainer
+import com.getaudio.app.ui.components.uiCardColor
+import com.getaudio.app.ui.components.uiHairline
+import com.getaudio.app.ui.components.uiMuted
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -124,74 +143,249 @@ fun AudioEditScreen(track: TrackEntity, onClose: () -> Unit, onSaved: (TrackEnti
     }
     Dialog(onDismissRequest = { if (!busy) onClose() }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = !busy, dismissOnClickOutside = false)) {
         Surface(Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("剪辑音频", style = MaterialTheme.typography.titleLarge)
-                    TextButton(onClick = onClose, enabled = !busy) { Text("关闭") }
+            Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("剪辑音频", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            track.title,
+                            fontSize = 12.sp,
+                            color = uiMuted(),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Box(
+                        Modifier.size(36.dp).clip(CircleShape).background(uiAccentContainer())
+                            .clickable(enabled = !busy, onClick = onClose),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Default.Close, "关闭", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
-                Text(track.title, style = MaterialTheme.typography.titleSmall)
-                if (loading) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("正在准备音频…") }
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                if (loading) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("正在准备音频…", fontSize = 12.sp, color = uiMuted()) }
+                error?.let {
+                    Text(
+                        it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.error.copy(alpha = 0.08f))
+                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                    )
+                }
                 if (file != null && duration > 0) {
-                    Text("选中的是保留部分 · 点击波形定位，拖动两端调整范围", style = MaterialTheme.typography.bodySmall)
+                    Text("选中的是保留部分 · 点击波形定位，拖动两端调整范围", fontSize = 12.sp, color = uiMuted())
                     val window = (duration / zoom).toLong().coerceAtLeast(1)
                     val viewStart = ((duration - window) * offset).toLong()
-                    WaveformEditor(peaks, duration, viewStart, window, segments, active, position, !busy,
-                        onSeek = { originalAt(it, playing) }, onRange = { update(it) })
-                    if (waveformLoading) Text("正在生成真实波形…", style = MaterialTheme.typography.bodySmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        TextButton(onClick = { zoom = (zoom / 2).coerceAtLeast(1f) }, enabled = !busy) { Text("缩小") }
-                        TextButton(onClick = { zoom = (zoom * 2).coerceAtMost(64f) }, enabled = !busy) { Text("放大") }
-                        Text("${editTime(viewStart)} — ${editTime((viewStart + window).coerceAtMost(duration))}", style = MaterialTheme.typography.labelSmall)
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = uiCardColor(),
+                        border = BorderStroke(1.dp, uiHairline()),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        WaveformEditor(peaks, duration, viewStart, window, segments, active, position, !busy,
+                            onSeek = { originalAt(it, playing) }, onRange = { update(it) })
                     }
-                    if (zoom > 1) { Text("移动波形视窗", style = MaterialTheme.typography.labelSmall); Slider(offset, { offset = it }, enabled = !busy) }
-                    Text("${editTime(position)} / ${editTime(duration)}")
+                    if (waveformLoading) Text("正在生成真实波形…", fontSize = 12.sp, color = uiMuted())
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        SheetPill("缩小", Icons.Default.Remove, { zoom = (zoom / 2).coerceAtLeast(1f) }, enabled = !busy)
+                        SheetPill("放大", Icons.Default.Add, { zoom = (zoom * 2).coerceAtMost(64f) }, enabled = !busy)
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            "${editTime(viewStart)} — ${editTime((viewStart + window).coerceAtMost(duration))}",
+                            fontSize = 11.sp, color = uiMuted(),
+                        )
+                    }
+                    if (zoom > 1) {
+                        Text("移动波形视窗", fontSize = 11.sp, color = uiMuted())
+                        Slider(offset, { offset = it }, enabled = !busy)
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = uiAccentContainer().copy(alpha = 0.6f),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.PlayCircleOutline, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(8.dp))
+                            Text(editTime(position), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                            Text(" / ${editTime(duration)}", fontSize = 13.sp, color = uiMuted())
+                        }
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { if (playing) player.pause() else originalAt(position, true) }, enabled = !busy) { Text(if (playing) "暂停" else "播放原音频") }
-                        OutlinedButton(onClick = {
-                            val clips = valid ?: return@OutlinedButton
-                            previewSegments = clips; preview = true
-                            player.setMediaItems(clips.map { AudioEditor.clippedItem(file!!, it) }); player.prepare(); player.play()
-                        }, enabled = valid != null && !busy) { Text("试听剪辑结果") }
+                        Button(
+                            onClick = { if (playing) player.pause() else originalAt(position, true) },
+                            enabled = !busy,
+                            shape = RoundedCornerShape(14.dp),
+                        ) { Text(if (playing) "暂停" else "播放原音频") }
+                        OutlinedButton(
+                            onClick = {
+                                val clips = valid ?: return@OutlinedButton
+                                previewSegments = clips; preview = true
+                                player.setMediaItems(clips.map { AudioEditor.clippedItem(file!!, it) }); player.prepare(); player.play()
+                            },
+                            enabled = valid != null && !busy,
+                            shape = RoundedCornerShape(14.dp),
+                        ) { Text("试听剪辑结果") }
                     }
-                    Text(if (preview) "正在试听保留片段，按原时间顺序连续播放" else "边听边选择起点和终点", style = MaterialTheme.typography.bodySmall)
-                    segments.forEachIndexed { index, segment ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            TextButton(onClick = { active = index }, enabled = !busy) { Text("${if (active == index) "● " else ""}片段 ${index + 1}  ${editTime(segment.startMs)} — ${editTime(segment.endMs)}") }
-                            TextButton(onClick = { player.pause(); originalAt(position); segments = segments.filterIndexed { i, _ -> i != index }; active = active.coerceAtMost((segments.size - 1).coerceAtLeast(0)) }, enabled = !busy) { Text("移除") }
+                    Text(if (preview) "正在试听保留片段，按原时间顺序连续播放" else "边听边选择起点和终点", fontSize = 12.sp, color = uiMuted())
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = uiCardColor(),
+                        border = BorderStroke(1.dp, uiHairline()),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(vertical = 4.dp)) {
+                            segments.forEachIndexed { index, segment ->
+                                val isActive = active == index
+                                Row(
+                                    Modifier.fillMaxWidth()
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.09f) else Color.Transparent)
+                                        .clickable(enabled = !busy) { active = index }
+                                        .padding(start = 10.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Box(
+                                        Modifier.size(8.dp).clip(CircleShape)
+                                            .background(if (isActive) MaterialTheme.colorScheme.primary else uiHairline()),
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(
+                                        "片段 ${index + 1}",
+                                        fontSize = 13.sp,
+                                        fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        "${editTime(segment.startMs)} — ${editTime(segment.endMs)}",
+                                        Modifier.weight(1f),
+                                        fontSize = 11.sp,
+                                        color = uiMuted(),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Box(
+                                        Modifier.size(30.dp).clip(CircleShape).clickable(enabled = !busy) {
+                                            player.pause(); originalAt(position)
+                                            segments = segments.filterIndexed { i, _ -> i != index }
+                                            active = active.coerceAtMost((segments.size - 1).coerceAtLeast(0))
+                                        },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(Icons.Default.Close, "移除片段 ${index + 1}", Modifier.size(15.dp), tint = uiMuted())
+                                    }
+                                }
+                                if (index != segments.lastIndex) SheetDivider()
+                            }
                         }
                     }
                     if (selected != null) {
                         RangeSlider(value = selected.startMs.toFloat()..selected.endMs.toFloat(), onValueChange = { update(AudioSegment(it.start.toLong(), it.endInclusive.toLong())) }, valueRange = 0f..duration.toFloat(), enabled = !busy)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(startText, { startText = it }, label = { Text("开始 分:秒") }, modifier = Modifier.weight(1f), enabled = !busy, singleLine = true)
-                            OutlinedTextField(endText, { endText = it }, label = { Text("结束 分:秒") }, modifier = Modifier.weight(1f), enabled = !busy, singleLine = true)
+                            OutlinedTextField(
+                                startText, { startText = it },
+                                label = { Text("开始 分:秒", fontSize = 12.sp) },
+                                modifier = Modifier.weight(1f), enabled = !busy, singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                                    unfocusedBorderColor = uiHairline(),
+                                    focusedContainerColor = uiCardColor(),
+                                    unfocusedContainerColor = uiCardColor(),
+                                ),
+                            )
+                            OutlinedTextField(
+                                endText, { endText = it },
+                                label = { Text("结束 分:秒", fontSize = 12.sp) },
+                                modifier = Modifier.weight(1f), enabled = !busy, singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                                    unfocusedBorderColor = uiHairline(),
+                                    focusedContainerColor = uiCardColor(),
+                                    unfocusedContainerColor = uiCardColor(),
+                                ),
+                            )
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            TextButton(onClick = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            SheetPill("应用时间", null, {
                                 val start = parseEditTime(startText); val end = parseEditTime(endText)
                                 if (start == null || end == null || start >= end || end > duration) error = "请填写有效的开始和结束时间"
                                 else { update(AudioSegment(start, end)); error = null }
-                            }, enabled = !busy) { Text("应用时间") }
-                            TextButton(onClick = { update(selected.copy(startMs = position.coerceIn(0, selected.endMs - 1))) }, enabled = !busy && selected.endMs > 0) { Text("当前位置为起点") }
-                            TextButton(onClick = { update(selected.copy(endMs = position.coerceIn(selected.startMs + 1, duration))) }, enabled = !busy && selected.startMs < duration) { Text("当前位置为终点") }
+                            }, primary = true, enabled = !busy)
+                            SheetPill("起点设为当前", null, { update(selected.copy(startMs = position.coerceIn(0, selected.endMs - 1))) }, enabled = !busy && selected.endMs > 0)
+                            SheetPill("终点设为当前", null, { update(selected.copy(endMs = position.coerceIn(selected.startMs + 1, duration))) }, enabled = !busy && selected.startMs < duration)
                         }
                     }
-                    OutlinedButton(onClick = {
-                        val sorted = segments.sortedBy { it.startMs }
-                        val boundaries = listOf(AudioSegment(0, 0)) + sorted + AudioSegment(duration, duration)
-                        val gap = boundaries.zipWithNext().firstOrNull { (a, b) -> b.startMs - a.endMs >= 1000 }
-                        if (gap == null) error = "没有可添加的空白区间，请先缩短或移除已有片段"
-                        else { player.pause(); originalAt(position); segments = segments + AudioSegment(gap.first.endMs, minOf(gap.second.startMs, gap.first.endMs + 30000)); active = segments.lastIndex; error = null }
-                    }, enabled = !busy) { Text("添加片段") }
-                    Text(if (valid == null) "请检查片段：至少一段，时间有效且不能重叠" else "最终时长 ${editTime(valid.sumOf { it.endMs - it.startMs })} · 多段按原顺序拼接", color = if (valid == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
-                    HorizontalDivider()
-                    Row { RadioButton(!overwrite, { overwrite = false; title = track.title + "（剪辑）" }, enabled = !busy); Text("另存为新音频") }
-                    Row { RadioButton(overwrite, { overwrite = true; title = track.title }, enabled = !busy); Text("覆盖本地音频") }
-                    OutlinedTextField(title, { title = it }, label = { Text("音频名称（允许同名）") }, modifier = Modifier.fillMaxWidth(), singleLine = true, enabled = !busy)
-                    Text("剪辑在手机本地完成，结果保存为 M4A；服务器原文件保持原样。", style = MaterialTheme.typography.bodySmall)
-                    if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("正在生成并保存剪辑结果…") }
-                    Button(onClick = { if (overwrite) confirmOverwrite = true else save() }, enabled = !busy && valid != null && title.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("保存剪辑") }
+                    OutlinedButton(
+                        onClick = {
+                            val sorted = segments.sortedBy { it.startMs }
+                            val boundaries = listOf(AudioSegment(0, 0)) + sorted + AudioSegment(duration, duration)
+                            val gap = boundaries.zipWithNext().firstOrNull { (a, b) -> b.startMs - a.endMs >= 1000 }
+                            if (gap == null) error = "没有可添加的空白区间，请先缩短或移除已有片段"
+                            else { player.pause(); originalAt(position); segments = segments + AudioSegment(gap.first.endMs, minOf(gap.second.startMs, gap.first.endMs + 30000)); active = segments.lastIndex; error = null }
+                        },
+                        enabled = !busy,
+                        shape = RoundedCornerShape(14.dp),
+                    ) { Text("添加片段") }
+                    Text(
+                        if (valid == null) "请检查片段：至少一段，时间有效且不能重叠"
+                        else "最终时长 ${editTime(valid.sumOf { it.endMs - it.startMs })} · 多段按原顺序拼接",
+                        fontSize = 12.sp,
+                        color = if (valid == null) MaterialTheme.colorScheme.error else uiMuted(),
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = uiCardColor(),
+                        border = BorderStroke(1.dp, uiHairline()),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(!overwrite, { overwrite = false; title = track.title + "（剪辑）" }, enabled = !busy)
+                                Text("另存为新音频", fontSize = 14.sp)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(overwrite, { overwrite = true; title = track.title }, enabled = !busy)
+                                Text("覆盖本地音频", fontSize = 14.sp)
+                            }
+                            OutlinedTextField(
+                                title, { title = it },
+                                label = { Text("音频名称（允许同名）", fontSize = 12.sp) },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+                                singleLine = true, enabled = !busy,
+                                shape = RoundedCornerShape(14.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                                    unfocusedBorderColor = uiHairline(),
+                                    focusedContainerColor = uiCardColor(),
+                                    unfocusedContainerColor = uiCardColor(),
+                                ),
+                            )
+                        }
+                    }
+                    Text("剪辑在手机本地完成，结果保存为 M4A；服务器原文件保持原样。", fontSize = 12.sp, color = uiMuted())
+                    if (busy) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        Text("正在生成并保存剪辑结果…", fontSize = 12.sp, color = uiMuted())
+                    }
+                    Button(
+                        onClick = { if (overwrite) confirmOverwrite = true else save() },
+                        enabled = !busy && valid != null && title.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        shape = RoundedCornerShape(16.dp),
+                    ) { Text("保存剪辑", fontSize = 15.sp) }
+                    Spacer(Modifier.height(8.dp))
                 }
             }
         }

@@ -8,9 +8,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import com.getaudio.app.player.PlayerHolder
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Link
@@ -18,6 +25,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.getaudio.app.ui.screen.ExtractScreen
 import com.getaudio.app.ui.screen.LibraryScreenV2
@@ -55,6 +63,10 @@ class MainActivity : ComponentActivity() {
                     bottomBar = {
                         Column {
                             if (tab == Tab.LIBRARY) QueueBar()
+                            HorizontalDivider(
+                                thickness = 0.5.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                            )
                             NavigationBar {
                             Tab.entries.forEach { t ->
                                 NavigationBarItem(
@@ -69,10 +81,27 @@ class MainActivity : ComponentActivity() {
                     }
                 ) { padding ->
                     Surface(Modifier.fillMaxSize().padding(padding)) {
-                        when (tab) {
-                            Tab.LIBRARY -> LibraryScreenV2(openCategories)
-                            Tab.EXTRACT -> ExtractScreen(prefill = shared, onSharedConsumed = { shared = null })
-                            Tab.MY -> MyScreen()
+                        Box(Modifier.fillMaxSize()) {
+                            when (tab) {
+                                Tab.LIBRARY -> LibraryScreenV2(openCategories)
+                                Tab.EXTRACT -> ExtractScreen(prefill = shared, onSharedConsumed = { shared = null })
+                                Tab.MY -> MyScreen()
+                            }
+                            Box(
+                                Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .fillMaxWidth()
+                                    .height(12.dp)
+                                    .background(
+                                        Brush.verticalGradient(
+                                            listOf(
+                                                Color.Transparent,
+                                                MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+                                                MaterialTheme.colorScheme.surface,
+                                            )
+                                        )
+                                    )
+                            )
                         }
                     }
                 }

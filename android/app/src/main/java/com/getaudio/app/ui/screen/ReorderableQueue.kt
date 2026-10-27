@@ -1,12 +1,18 @@
 package com.getaudio.app.ui.screen
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -14,6 +20,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -22,10 +29,16 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.getaudio.app.player.PlayerHolder
+import com.getaudio.app.ui.formatDuration
+import com.getaudio.app.ui.components.uiCardColor
+import com.getaudio.app.ui.components.uiHairline
+import com.getaudio.app.ui.components.uiMuted
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -87,10 +100,21 @@ internal fun ReorderableQueue(
         }
     }
     Column {
-        Text(if (saving) "正在保存顺序…" else "长按歌曲上下拖动排序", style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-        LazyColumn(state = state, modifier = Modifier.heightIn(max = 420.dp).pointerInput(Unit) {
+        if (saving) {
+            Text(
+                "正在保存顺序…",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+            )
+        }
+        error?.let {
+            Text(
+                it, color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
+            )
+        }
+        LazyColumn(state = state, modifier = Modifier.heightIn(max = 430.dp).pointerInput(Unit) {
             detectDragGesturesAfterLongPress(
                 onDragStart = { offset ->
                     if (!saving) {
@@ -123,34 +147,129 @@ internal fun ReorderableQueue(
                 val active = draggedId == id
                 val current = id == currentId
                 val location = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id }
-                Row(Modifier.fillMaxWidth().zIndex(if (active) 1f else 0f)
-                    .graphicsLayer { translationY = if (active && location != null) center - location.offset - location.size / 2f else 0f }
-                    .regionFrame(current || active).semantics {
-                        customActions = listOfNotNull(
-                            if (i > 0) CustomAccessibilityAction("上移") {
-                                if (!saving && draggedId == null) saveOrder(draft.toMutableList().apply { add(i - 1, removeAt(i)) })
-                                true
-                            } else null,
-                            if (i < draft.lastIndex) CustomAccessibilityAction("下移") {
-                                if (!saving && draggedId == null) saveOrder(draft.toMutableList().apply { add(i + 1, removeAt(i)) })
-                                true
-                            } else null,
-                        )
-                    }.padding(horizontal = 6.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.DragHandle, "拖动排序：${item.track.title}", Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("${i + 1}", Modifier.widthIn(min = 20.dp), style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(item.track.title, Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis,
-                        color = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-                    IconButton(enabled = !saving && draggedId == null, onClick = { onPlay(id) }) {
-                        Icon(if (current && playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            if (current && playing) "暂停第${i + 1}个音频" else "播放第${i + 1}个音频",
-                            tint = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-                    }
-                    AreaButton(enabled = !saving && draggedId == null, onClick = { onRemove(id) }, tone = ActionTone.DESTRUCTIVE) { Text("移除") }
+                QueueRow(
+                    index = i,
+                    title = item.track.title,
+                    uploader = item.track.uploader,
+                    durationSec = item.track.durationSec,
+                    current = current,
+                    playing = current && playing,
+                    lifted = active,
+                    enabled = !saving && draggedId == null,
+                    onPlay = { onPlay(id) },
+                    onRemove = { onRemove(id) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .zIndex(if (active) 1f else 0f)
+                        .graphicsLayer {
+                            translationY = if (active && location != null) center - location.offset - location.size / 2f else 0f
+                            shadowElevation = if (active) 16f else 0f
+                        }
+                        .semantics {
+                            customActions = listOfNotNull(
+                                if (i > 0) CustomAccessibilityAction("上移") {
+                                    if (!saving && draggedId == null) saveOrder(draft.toMutableList().apply { add(i - 1, removeAt(i)) })
+                                    true
+                                } else null,
+                                if (i < draft.lastIndex) CustomAccessibilityAction("下移") {
+                                    if (!saving && draggedId == null) saveOrder(draft.toMutableList().apply { add(i + 1, removeAt(i)) })
+                                    true
+                                } else null,
+                            )
+                        },
+                )
+            }
+        }
+    }
+}
+
+/** 队列行：卡片底 + 序号 + 拖动把手 + 圆形播放入口 + 移除。 */
+@Composable
+private fun QueueRow(
+    index: Int,
+    title: String,
+    uploader: String?,
+    durationSec: Double?,
+    current: Boolean,
+    playing: Boolean,
+    lifted: Boolean,
+    enabled: Boolean,
+    onPlay: () -> Unit,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(16.dp)
+    Surface(
+        modifier = modifier,
+        shape = shape,
+        color = if (current) colors.primary.copy(alpha = 0.09f) else uiCardColor(),
+        border = BorderStroke(1.dp, if (current) colors.primary.copy(alpha = 0.45f) else uiHairline()),
+        tonalElevation = 0.dp,
+    ) {
+        Row(
+            Modifier.padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Default.DragHandle,
+                "拖动排序：$title",
+                Modifier.size(18.dp),
+                tint = colors.onSurfaceVariant.copy(alpha = 0.55f),
+            )
+            Box(
+                Modifier.size(24.dp).clip(CircleShape)
+                    .background(if (current) colors.primary else colors.surfaceVariant.copy(alpha = 0.7f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "${index + 1}",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (current) colors.onPrimary else colors.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    fontSize = 14.sp,
+                    lineHeight = 19.sp,
+                    fontWeight = if (current) FontWeight.Medium else FontWeight.Normal,
+                    color = if (current) colors.primary else colors.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val sub = listOfNotNull(
+                    uploader?.takeIf { it.isNotBlank() },
+                    durationSec?.takeIf { it > 0 }?.let { formatDuration(it) },
+                ).joinToString("  ·  ")
+                if (sub.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(sub, fontSize = 11.sp, color = uiMuted(), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+            }
+            Box(
+                Modifier.size(36.dp).clip(CircleShape)
+                    .background(if (current) colors.primary else colors.surfaceVariant.copy(alpha = 0.55f))
+                    .clickable(enabled = enabled, onClick = onPlay),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    if (playing) "暂停第${index + 1}个音频" else "播放第${index + 1}个音频",
+                    Modifier.size(18.dp),
+                    tint = if (current) colors.onPrimary else colors.primary,
+                )
+            }
+            Box(
+                Modifier.size(32.dp).clip(CircleShape).clickable(enabled = enabled, onClick = onRemove),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.Close, "从列表移除：$title", Modifier.size(17.dp),
+                    tint = colors.onSurfaceVariant.copy(alpha = if (enabled) 0.7f else 0.3f),
+                )
             }
         }
     }
