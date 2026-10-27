@@ -166,7 +166,10 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
         queueItems(tracks, true)
     }
 
-    Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+    Scaffold(
+        containerColor = Color.Transparent,
+        snackbarHost = { SnackbarHost(snackbar) },
+    ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
                 .height(44.dp).clip(RoundedCornerShape(14.dp)).background(uiAccentContainer()).padding(4.dp),

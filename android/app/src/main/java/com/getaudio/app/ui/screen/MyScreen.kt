@@ -20,6 +20,7 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Feedback
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Storage
@@ -66,6 +67,8 @@ fun MyScreen() {
     val account by com.getaudio.app.data.repo.AccountStore.current.collectAsState()
     var showLogin by remember { mutableStateOf(false) }
     var showAgent by remember { mutableStateOf(false) }
+    var showAppearance by remember { mutableStateOf(false) }
+    val background by com.getaudio.app.data.repo.BackgroundStore.state.collectAsState()
     val version = remember { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "未知" }
     val diagnosticExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         if (uri != null) scope.launch {
@@ -85,6 +88,10 @@ fun MyScreen() {
     }
     if (showLogin) {
         SubPageScaffold("平台授权", onBack = { showLogin = false }) { LoginScreen() }
+        return
+    }
+    if (showAppearance) {
+        SubPageScaffold("背景图片", onBack = { showAppearance = false }) { AppearanceScreen() }
         return
     }
     if (showAgent) {
@@ -111,6 +118,17 @@ fun MyScreen() {
             SettingRow(Icons.Rounded.VerifiedUser, "平台授权", subtitle = "B站 / 抖音提取凭证", onClick = { showLogin = true })
             RowDivider()
             SettingRow(Icons.Rounded.GraphicEq, "音频助手", onClick = { showAgent = true })
+        }
+
+        SectionTitle("外观")
+        SectionCard {
+            SettingRow(
+                Icons.Rounded.Image,
+                "背景图片",
+                subtitle = if (background.enabled) "已启用 · 可调压暗程度" else "用喜欢的图片当页面背景",
+                value = if (background.enabled) "已开启" else "默认",
+                onClick = { showAppearance = true },
+            )
         }
 
         SectionTitle("存储")

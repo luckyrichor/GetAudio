@@ -27,6 +27,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.getaudio.app.ui.components.BackgroundLayer
+import com.getaudio.app.ui.components.LocalBackgroundEnabled
 import com.getaudio.app.ui.screen.ExtractScreen
 import com.getaudio.app.ui.screen.LibraryScreenV2
 import com.getaudio.app.ui.screen.MyScreen
@@ -43,8 +45,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.getaudio.app.data.repo.BackgroundStore.init(this)
         setContent {
             GetAudioTheme {
+                val background by com.getaudio.app.data.repo.BackgroundStore.state.collectAsState()
                 // 从 B站/抖音「分享到 GetAudio」进来时直接落在提取页
                 var shared by remember { mutableStateOf(sharedText(intent)) }
                 var tab by remember { mutableStateOf(if (shared != null) Tab.EXTRACT else Tab.LIBRARY) }
@@ -59,7 +63,12 @@ class MainActivity : ComponentActivity() {
                     onDispose { removeOnNewIntentListener(listener) }
                 }
 
-                Scaffold(
+                // 背景图铺在最底层，页面自己让出底色，卡片保持不透明以保证可读性。
+                CompositionLocalProvider(LocalBackgroundEnabled provides background.enabled) {
+                    Box(Modifier.fillMaxSize()) {
+                        BackgroundLayer()
+                        Scaffold(
+                    containerColor = Color.Transparent,
                     bottomBar = {
                         Column {
                             if (tab == Tab.LIBRARY) QueueBar()
@@ -67,7 +76,13 @@ class MainActivity : ComponentActivity() {
                                 thickness = 0.5.dp,
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
                             )
-                            NavigationBar {
+                            NavigationBar(
+                                containerColor = if (background.enabled) {
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.82f)
+                                } else {
+                                    NavigationBarDefaults.containerColor
+                                },
+                            ) {
                             Tab.entries.forEach { t ->
                                 NavigationBarItem(
                                     selected = tab == t,
@@ -80,7 +95,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 ) { padding ->
-                    Surface(Modifier.fillMaxSize().padding(padding)) {
+                    Surface(Modifier.fillMaxSize().padding(padding), color = Color.Transparent) {
                         Box(Modifier.fillMaxSize()) {
                             when (tab) {
                                 Tab.LIBRARY -> LibraryScreenV2(openCategories)
@@ -103,6 +118,8 @@ class MainActivity : ComponentActivity() {
                                     )
                             )
                         }
+                    }
+                }
                     }
                 }
             }
