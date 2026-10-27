@@ -87,17 +87,33 @@ class TrackRepository(private val context: Context) {
     // ---------- 提取 ----------
 
     /** 分享文本由手机直接提取，保存到本地库，不依赖 GetAudio 服务器。 */
-    suspend fun extract(text: String, onDiagnostic: (String) -> Unit = {}): Result<TrackEntity> = runCatching {
-        withContext(Dispatchers.IO) {
-            val entity = fileMutex.withLock {
-                val extracted = DirectExtractor(context) { line ->
-                    withContext(Dispatchers.Main) { onDiagnostic(line) }
-                }.extract(text)
-                trackDao.upsertLocal(extracted)
-                extracted
+    suspend fun extract(text: String, onDiagnostic: (String) -> Unit = {}): Result<TrackEntity> {
+        val lines = mutableListOf<String>()
+        val server = settings.serverUrlNow()
+        val owner = AccountStore.forServer(server)?.userId.orEmpty()
+        return runCatching {
+            withContext(Dispatchers.IO) {
+                val entity = fileMutex.withLock {
+                    val extracted = DirectExtractor(context) { line ->
+                        lines.add(line)
+                        withContext(Dispatchers.Main) { onDiagnostic(line) }
+                    }.extract(text)
+                    trackDao.upsertLocal(extracted)
+                    extracted
+                }
+                withContext(Dispatchers.Main) { onDiagnostic("已加入本地音频库") }
+                entity
             }
-            withContext(Dispatchers.Main) { onDiagnostic("已加入本地音频库") }
-            entity
+        }.onFailure { error ->
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            withContext(NonCancellable + Dispatchers.IO) {
+                runCatching {
+                    val log = lines + "提取失败：${error.javaClass.simpleName} · ${ApiProvider.humanMessage(error)}"
+                    FailureOutbox(File(context.filesDir, "failure-outbox")).enqueue(
+                        server, owner, text, com.getaudio.app.BuildConfig.VERSION_NAME, log)
+                    com.getaudio.app.sync.FailureReportWorker.schedule(context)
+                }.onFailure { DiagnosticsStore.event("失败报告", "本地暂存失败", false) }
+            }
         }
     }
 

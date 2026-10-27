@@ -206,3 +206,23 @@ data class PlatformAuthCompletion(
     val nickname: String,
     val session: AccountSession? = null,
 )
+
+@Serializable
+data class ExtractionFailureReport(
+    val id: String,
+    val version: String,
+    @SerialName("occurred_at_ms") val occurredAtMs: Long,
+    @SerialName("share_text") val shareText: String,
+    val logs: List<String>,
+)
+@Serializable
+data class ExtractionFailureAck(val id: String, val stored: Boolean)
+@Serializable
+data class ExtractionFailureDetail(
+    val id: String,
+    val version: String,
+    @SerialName("occurred_at_ms") val occurredAtMs: Long,
+    @SerialName("received_at") val receivedAt: String,
+    @SerialName("share_text") val shareText: String,
+    val logs: List<String>,
+)

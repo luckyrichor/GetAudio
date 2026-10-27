@@ -12,6 +12,7 @@ internal fun douyinNoteAudioUrls(detail: JSONObject): List<String> {
     if (url.scheme != "https" || url.port != 443 || url.username.isNotEmpty() || url.password.isNotEmpty())
         return emptyList()
     if (url.host != "douyinstatic.com" && !url.host.endsWith(".douyinstatic.com")) return emptyList()
-    if (!url.encodedPath.startsWith("/obj/ies-music/") || !url.encodedPath.endsWith(".mp3")) return emptyList()
+    val supportedBucket = listOf("/obj/ies-music/", "/obj/ies-music-hj/").any(url.encodedPath::startsWith)
+    if (!supportedBucket || !url.encodedPath.endsWith(".mp3")) return emptyList()
     return listOf(url.toString())
 }

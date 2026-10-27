@@ -29,6 +29,7 @@ class Settings(private val context: Context) {
         val normalized = url.trim().takeIf { it.isNotEmpty() }?.trimEnd('/')?.plus("/") ?: ""
         context.dataStore.edit { it[serverKey] = normalized }
         AccountStore.refreshVisibility(context)
+        com.getaudio.app.sync.FailureReportWorker.schedule(context)
     }
 
     suspend fun serverUrlNow(): String = serverUrl.first()

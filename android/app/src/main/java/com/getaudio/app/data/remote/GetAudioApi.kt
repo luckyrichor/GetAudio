@@ -9,6 +9,10 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 
 interface GetAudioApi {
+    @POST("v2/diagnostics/extractions") suspend fun uploadExtractionFailure(@Body body: ExtractionFailureReport): ExtractionFailureAck
+    @GET("v2/diagnostics/extractions") suspend fun extractionFailures(@Query("limit") limit: Int = 50): List<ExtractionFailureDetail>
+    @GET("v2/diagnostics/extractions/{report_id}") suspend fun extractionFailure(@Path("report_id") id: String): ExtractionFailureDetail
+
     @GET("account/platforms") suspend fun platformLoginCapabilities(): List<PlatformLoginCapability>
     @GET("account/platform-bindings") suspend fun platformAccountBindings(): List<PlatformAccountBinding>
     @POST("account/platform-auth/start") suspend fun platformAuthStart(@Body body: PlatformAuthStart): PlatformAuthTicket

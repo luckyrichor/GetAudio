@@ -16,6 +16,14 @@ class DouyinNoteAudioTest {
             org.json.JSONArray().put("https://aweme.snssdk.com/aweme/v1/playwm/?video_id=$audio"))
         assertEquals(listOf(audio), douyinNoteAudioUrls(detail))
     }
+    @Test fun imageNoteAcceptsVerifiedHjMusicBucket() {
+        val uri = "https://lf9-music-east.douyinstatic.com/obj/ies-music-hj/7523193955769453370.mp3"
+        assertEquals(listOf(uri), douyinNoteAudioUrls(item(2, uri)))
+    }
+    @Test fun unrelatedBucketsRemainRejected() {
+        assertTrue(douyinNoteAudioUrls(item(2,
+            "https://lf9-music-east.douyinstatic.com/obj/other-bucket/123.mp3")).isEmpty())
+    }
     @Test fun ordinaryVideoUriIsNotUsedAsAnAudioAddress() {
         assertTrue(douyinNoteAudioUrls(item(0, audio)).isEmpty())
     }

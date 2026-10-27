@@ -444,3 +444,6 @@ app.include_router(account_resource_router)
 
 from .platform_accounts import router as platform_account_router
 app.include_router(platform_account_router)
+
+from .failure_reports import router as failure_report_router
+app.include_router(failure_report_router)

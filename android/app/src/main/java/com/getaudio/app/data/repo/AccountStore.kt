@@ -67,6 +67,7 @@ object AccountStore {
             setVisibility()
         }
         reconcileQueue()
+        com.getaudio.app.sync.FailureReportWorker.schedule(appContext)
     }
 
     internal fun encrypt(bytes: ByteArray): ByteArray {

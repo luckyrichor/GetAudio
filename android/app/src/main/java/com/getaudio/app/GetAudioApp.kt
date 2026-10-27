@@ -10,5 +10,6 @@ class GetAudioApp : Application() {
         com.getaudio.app.data.repo.DiagnosticsStore.initialize(this)
         // 周期性同步：每 6 小时，仅在 WiFi 下
         SyncWorker.schedule(this)
+        com.getaudio.app.sync.FailureReportWorker.schedule(this)
     }
 }
