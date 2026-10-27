@@ -25,5 +25,6 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
           log-accepted-android-sdk-licenses: false
-      - run: ./gradlew assembleDebug --console=plain
+      # 只跑 debug + 单测：正式包的签名密钥只在本机（~/.android-keys）和服务器备份里，按设计不进 CI。
+      - run: ./gradlew testDebugUnitTest assembleDebug --console=plain
         working-directory: android
