@@ -15,3 +15,8 @@ android/build/
 android/app/build/
 android/local.properties
 android/.idea/
+android/keystore.properties
+
+# 签名密钥只放在 ~/.android-keys/ 并备份到服务器，绝不入库
+*.jks
+*.keystore
