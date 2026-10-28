@@ -3,6 +3,7 @@ package com.getaudio.app.ui.screen
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
@@ -42,7 +43,12 @@ import com.getaudio.app.ui.components.uiMuted
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
-/** Drag a local preview; commit once on release, cancel safely on dismiss or a live queue change. */
+/**
+ * 两种拖法都支持：
+ *  - 直接按住左侧把手往上/下拖（和库列表一致，不用先长按）；
+ *  - 长按任意一行再拖（可点面积大，好操作）。
+ * 拖动只是本地预览，松手才落库；面板关闭或队列被外部改动时安全取消。
+ */
 @Composable
 internal fun ReorderableQueue(
     queue: List<PlayerHolder.QueueItem>, currentId: Long?, playing: Boolean,
@@ -85,6 +91,28 @@ internal fun ReorderableQueue(
             } finally { saving = false; draft = latestQueue }
         }
     }
+    fun beginDrag(key: Long) {
+        if (saving) return
+        val info = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key } ?: return
+        draggedId = key
+        center = info.offset + info.size / 2f
+        finger = info.offset + info.size / 2f
+        error = null
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+    }
+    fun dragBy(dy: Float) {
+        if (draggedId == null) return
+        center += dy
+        finger += dy
+        moveAtCenter()
+    }
+    fun endDrag() {
+        val moved = draggedId != null && draft.map { it.track.id } != latestQueue.map { it.track.id }
+        draggedId = null
+        if (moved) saveOrder(draft)
+    }
+    fun cancelDrag() { draggedId = null; draft = latestQueue }
+
     LaunchedEffect(draggedId) {
         while (draggedId != null) {
             withFrameNanos { }
@@ -117,29 +145,17 @@ internal fun ReorderableQueue(
         LazyColumn(state = state, modifier = Modifier.heightIn(max = 430.dp).pointerInput(Unit) {
             detectDragGesturesAfterLongPress(
                 onDragStart = { offset ->
-                    if (!saving) {
-                        state.layoutInfo.visibleItemsInfo.firstOrNull {
-                            offset.y >= it.offset && offset.y < it.offset + it.size
-                        }?.let { item ->
-                            draggedId = item.key as Long
-                            center = item.offset + item.size / 2f
-                            finger = offset.y
-                            error = null
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        }
-                    }
+                    state.layoutInfo.visibleItemsInfo.firstOrNull {
+                        offset.y >= it.offset && offset.y < it.offset + it.size
+                    }?.let { item -> beginDrag(item.key as Long) }
                 },
                 onDrag = { change, amount ->
                     if (draggedId != null) {
-                        change.consume(); center += amount.y; finger += amount.y; moveAtCenter()
+                        change.consume(); dragBy(amount.y)
                     }
                 },
-                onDragEnd = {
-                    val moved = draggedId != null && draft.map { it.track.id } != latestQueue.map { it.track.id }
-                    draggedId = null
-                    if (moved) saveOrder(draft)
-                },
-                onDragCancel = { draggedId = null; draft = latestQueue },
+                onDragEnd = { endDrag() },
+                onDragCancel = { cancelDrag() },
             )
         }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             itemsIndexed(draft, key = { _, item -> item.track.id }) { i, item ->
@@ -158,11 +174,22 @@ internal fun ReorderableQueue(
                     enabled = !saving && draggedId == null,
                     onPlay = { onPlay(id) },
                     onRemove = { onRemove(id) },
+                    handleModifier = Modifier.pointerInput(id, saving) {
+                        // 按住把手直接拖，不必先长按 —— 与库列表的手感保持一致。
+                        detectDragGestures(
+                            onDragStart = { beginDrag(id) },
+                            onDrag = { change, amount -> change.consume(); dragBy(amount.y) },
+                            onDragEnd = { endDrag() },
+                            onDragCancel = { cancelDrag() },
+                        )
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .zIndex(if (active) 1f else 0f)
                         .graphicsLayer {
                             translationY = if (active && location != null) center - location.offset - location.size / 2f else 0f
+                            scaleX = if (active) 1.02f else 1f
+                            scaleY = if (active) 1.02f else 1f
                             shadowElevation = if (active) 16f else 0f
                         }
                         .semantics {
@@ -183,7 +210,7 @@ internal fun ReorderableQueue(
     }
 }
 
-/** 队列行：卡片底 + 序号 + 拖动把手 + 圆形播放入口 + 移除。 */
+/** 队列行：卡片底 + 拖动把手 + 序号 + 圆形播放入口 + 移除。 */
 @Composable
 private fun QueueRow(
     index: Int,
@@ -196,6 +223,7 @@ private fun QueueRow(
     enabled: Boolean,
     onPlay: () -> Unit,
     onRemove: () -> Unit,
+    handleModifier: Modifier = Modifier,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -211,12 +239,17 @@ private fun QueueRow(
             Modifier.padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                Icons.Default.DragHandle,
-                "拖动排序：$title",
-                Modifier.size(18.dp),
-                tint = colors.onSurfaceVariant.copy(alpha = 0.55f),
-            )
+            Box(
+                Modifier.size(width = 28.dp, height = 48.dp).then(handleModifier),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.DragHandle,
+                    "拖动排序：$title",
+                    Modifier.size(18.dp),
+                    tint = colors.onSurfaceVariant.copy(alpha = 0.55f),
+                )
+            }
             Box(
                 Modifier.size(24.dp).clip(CircleShape)
                     .background(if (current) colors.primary else colors.surfaceVariant.copy(alpha = 0.7f)),
