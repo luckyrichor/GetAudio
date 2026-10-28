@@ -95,6 +95,28 @@ $ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs \
   app/build/outputs/apk/release/app-release.apk | grep SHA-256
 ```
 
+## 发布：标签 + GitHub Release（每次都要）
+
+打完 tag 别只 `git push --tags`，必须同时把 APK 挂到 GitHub Release，用户从 Releases 页面直接下载：
+
+```bash
+git tag -a v0.9.9 -m "GetAudio 0.9.9：……" && git push origin main v0.9.9
+
+gh release create v0.9.9 \
+  --title "GetAudio v0.9.9" \
+  --notes-file /tmp/rel-audio.md \
+  android/app/build/outputs/apk/release/app-release.apk#getaudio-0.9.9-release.apk
+```
+
+约定（与历史 Release 保持一致）：
+
+- 标题 `GetAudio v0.9.9`，tag 同名（带 `v`），附件名 `getaudio-0.9.9-release.apk`
+- 说明分「更新内容 / 验证」两段，末尾一句「与上一版同签名，可直接覆盖安装」
+- GetVideo 同理：`getvideo-0.3.9-release.apk`、标题 `GetVideo v0.3.9`
+
+`gh release create` 前先确认 `assembleRelease` 产物就是当前版本（`versionName` 对得上），
+否则会把旧包挂到新 tag 上。
+
 ## 迁移注意
 
 换成固定证书是一次性的"签名断代"：手机上装旧证书包的设备，第一次升级必须卸载重装
