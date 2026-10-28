@@ -23,3 +23,6 @@ android/keystore.properties
 
 # macOS
 .DS_Store
+
+# 本地 Agent 记忆与缓存
+.workbuddy/

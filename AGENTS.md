@@ -74,6 +74,8 @@ sh android/gradlew -p android testDebugUnitTest lintDebug assembleDebug assemble
 
 - 音频元数据和文件是主体，播放列表保存引用；删除时清除所有引用。排序只更新引用次序，并调用 Media3 `moveMediaItem`，不重新加载正在播放的文件。
 - 库页顺序由 `tracks.sortIndex` 决定（0 = 未手动排过，排在已排序项之前；查询 `ORDER BY sortIndex ASC, addedAtMs DESC, id DESC`）。拖动后全库重编号 1..N，但只替换**可见槽位**，筛选状态下不会打乱被筛掉的条目；只有「手动」档允许拖动，字段排序时自动禁用，否则松手即被排序覆盖。见 `docs/library-sort-and-editor-0.9.x.md`。
+- 队列拖动只用长按整行（行首把手已删）：换位条件是中心**越过目标行中线**，否则首行下拖会来回抖；贴边自动滚动后要把消费的滚动量补进 `center`，且命中不到行时取最近边缘行，否则拖出视口后列表还在滚但顺序不动。见 `docs/queue-drag-and-motion-background.md`。
+- 动态背景用独立 ExoPlayer：`volume = 0` 且 `setAudioAttributes(..., handleAudioFocus = false)`，不抢音频焦点；`ON_STOP` 暂停、`ON_START` 恢复。动态背景与静态图互斥，一次只生效一个。壁纸引擎只支持其「视频」类 mp4/webm，`scene.pkg` 不解析。
 - 冷启动恢复上次列表、歌曲、位置、播放方式，默认暂停；已有效连接的播放会话不重置。Room 顺序是权威，按歌曲 ID 定位，旧版本未保存的位置无法追溯。见 `docs/playback-resume.md`。
 - B 站播放地址普通 HTTP 返回 412 时才启用受限 WebView 备用请求；保留 `p=N` 分 P。只确认两种请求上下文结果不同，不能臆测具体 IP/TLS/风控算法。
 - 抖音图文 `aweme_type=2` 可能没有 `music.play_url`，真实 MP3 放在 `video.play_addr.uri`；包装 `url_list` 可能不可用。0.8.7 允许经验证的 `/obj/ies-music/` 和 `/obj/ies-music-hj/`，仍限制 HTTPS/443、平台 CDN、无用户信息和 MP3，不能随意扩大到任意 URI。
@@ -85,12 +87,16 @@ sh android/gradlew -p android testDebugUnitTest lintDebug assembleDebug assemble
 
 ### 当前进度、下一步与验证
 
-- 已交付：0.8.2 B 站 412/分 P、0.8.3 抖音图文音乐、0.8.4 拖拽、0.8.5 退出恢复（`c9a3a29` 真机恢复 18 首及 01:06）、0.8.6 授权入口崩溃修复（`7bcd659`）、0.8.7 图文 `ies-music-hj` 与失败自动上报（`f72a73e`）、0.9.0 批量提取/自定义背景/导入本地音频/412 加固（`7840de1`）、0.9.1–0.9.4 库页排序与剪辑页重构（`707577d`、`b982a85`、`cd1f82b`、`23ed6c9`）。当前 HEAD `23ed6c9` / v0.9.4 / versionCode 32，`origin/main` 同步。
-- 本轮（2026-10-28）仅补文档：新增 `docs/library-sort-and-editor-0.9.x.md`，README 当前版本与 0.9.x 章节，AGENTS 交接与更新日志；删除误入库的编辑器临时文件。未改功能代码。
-- 验证（本地实测）：Android `testDebugUnitTest --rerun-tasks` 75 项通过、`lintDebug` 0 errors / 29 warnings；服务端 `163 passed, 1 failed`，失败项为 `test_real_fingerprint_ignores_metadata`（本机 FFmpeg 缺 Chromaprint，已知限制）。本轮未部署 tx、未做真机验收。
-- 真机结果（0.8.7 时期，仍是最近一次）：原图文已入库为「现在开始跳动」（作者下雨天气晴）；受控无效文本失败自动到达 tx，报告 `1a2ec0a1-80bc-45f4-bef7-2236446f71de` 已通过 SSH CLI 回查，包含版本、时间、分享文本和错误步骤。
-- 进行中：无遗留代码实施；下一步仍是按专题文档做真机验收，先补 0.9.x 库页拖动/排序与剪辑页三键，再补断网/后台强杀/跨账号长时间积压的注入验收，不把已实现保护当作已全量实测。
-- 待验收：0.9.x 长按拖动排序（含筛选状态下只重排可见槽位）、排序字段切换后的顺序保持、剪辑页三键听感与波形缓存二次进入、卡片不透明度 12%/100% 极值可读性、Room 8→9 真机升级；早期波形剪辑编解码与平台扫码完成/私密内容仍需逐项验收。
+- 已交付：0.8.2 B 站 412/分 P、0.8.3 抖音图文音乐、0.8.4 拖拽、0.8.5 退出恢复（`c9a3a29` 真机恢复 18 首及 01:06）、0.8.6 授权入口崩溃修复（`7bcd659`）、0.8.7 图文 `ies-music-hj` 与失败自动上报（`f72a73e`）、0.9.0 批量提取/自定义背景/导入本地音频/412 加固（`7840de1`）、0.9.1–0.9.4 库页排序与剪辑页重构（`707577d`、`b982a85`、`cd1f82b`、`23ed6c9`）、0.9.5 队列拖动重做与动态背景。
+- 本轮（2026-10-28）：先补 0.9.1–0.9.4 文档（`40f1bb4`、`18275b0`），随后实现 0.9.5：
+  - 删除队列行首 `DragHandle` 把手，整行只保留序号/标题/播放/移除；拖动改为只走长按整行。
+  - 落点判定改为「中心越过目标行中线」才换位，修首个条目下拖来回抖。
+  - 自动滚动把消费的滚动量补到 `center`，命中不到行时取最近边缘行，并每帧重新判定，修拖出视口后停止重排。
+  - 新增 `docs/queue-drag-and-motion-background.md` 与 `ui/components/MotionBackground.kt`：支持 mp4/webm 视频（独立 ExoPlayer、volume 0、不申请音频焦点、随生命周期暂停）与 GIF/WebP（API 28+ `ImageDecoder`，26/27 用 `Movie`）；外观页加入入口与壁纸引擎说明。
+- 验证（本地实测）：Android `testDebugUnitTest` 75 项通过、`lintDebug` 0 errors / 28 warnings，debug 与 release 构建成功；release 同签名原地升级到 0.9.5 / code 33 成功。服务端本轮未改，沿用 163 passed / 1 已知 Chromaprint 失败。
+- 真机结果（0.8.7 时期，仍是最近一次功能验收）：原图文已入库为「现在开始跳动」（作者下雨天气晴）；受控无效文本失败自动到达 tx，报告 `1a2ec0a1-80bc-45f4-bef7-2236446f71de` 已通过 SSH CLI 回查。
+- 进行中：无遗留代码实施；下一步按专题做真机验收：队列拖动（首行下拖、贴边滚动、快速甩动）、动态背景（视频声音隔离、切后台、锁屏回来）、0.9.x 库页排序与剪辑页三键。
+- 待验收：0.9.5 队列拖动与动态背景全部真机项；0.9.x 长按拖动排序（筛选状态下只重排可见槽位）、排序字段切换后的顺序保持、剪辑页三键听感与波形缓存二次进入、卡片不透明度极值可读性、Room 8→9 真机升级；断网/后台强杀/跨账号积压注入仍未做。
 - 未开始：不额外承诺新平台、后台批量提取或服务端音频听辨；后续需求由用户决定。后续平台路径/权限变化先抓本次证据，再修复，不能凭旧报错直接套方案。
 
 ### 飞书归档与本轮同步
@@ -107,6 +113,8 @@ sh android/gradlew -p android testDebugUnitTest lintDebug assembleDebug assemble
 本轮已同步：0.9.x 文档补齐、本地测试数字、未验收边界与 GitHub 链接；概览「当前进度」已更新到 0.9.4，开发记录追加 2026-10-28 一节，新主题在 GetAudio 节点下，三篇正文均已回查。
 
 ### 更新日志（客户端日期）
+
+- 2026-10-28（0.9.5）：队列去掉行首把手、修首行下拖抖动与拖出视口停止重排；新增视频/动图动态背景。Android 75 项单测、Lint 0 errors/28 warnings、debug+release 构建通过，release 覆盖安装到真机 0.9.5 (33)。未改服务端、未部署 tx、未真机验收手势与背景。
 
 - 2026-10-28：完成 0.9.1–0.9.4 文档补齐。核对 v0.9.0..v0.9.4 源码确认库页 `sortIndex`（Room 8→9）、可见槽位重排、五档排序字段与两段式控件、剪辑页三键与 `WaveformCache`、队列双通道拖动、四个子页 `BackHandler`、外观页精简；重跑 Android 75 项与 Lint、服务端 163 项取证；删除误入库的 `docs/*.mdxr7gPl` 临时文件。未改功能代码。
 
