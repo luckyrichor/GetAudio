@@ -120,9 +120,12 @@ sh android/gradlew -p android testDebugUnitTest lintDebug assembleDebug assemble
 - 0.9.5 主题：<https://kcn0pbn0hwo0.feishu.cn/wiki/FFJdwBRXYifVSbkypN7cWuL8nKh>（docx `EjlqdUqq2oYxEJx76PQcvfYonlf`，同一父节点）。
 - 0.9.6 主题：<https://kcn0pbn0hwo0.feishu.cn/wiki/Zrclwa2wLiwqkIkRpPUcRnA3nwd>（docx `SBMQdHuimo2T4Dx3H38cz2dnnKd`，同一父节点）。
 - 0.9.7 主题：<https://kcn0pbn0hwo0.feishu.cn/wiki/Hpb1wBJn1icT5Ckdx4AcpQ4Wnkb>（docx `XSVydmlcMo5MLUxDuCScblmynld`，同一父节点，已 `+node-list` 回查）。
+- 0.9.8 主题：<https://kcn0pbn0hwo0.feishu.cn/wiki/F9ZZw6Ag7i2WUUkyk2RcNj1UnRf>（docx `GeoqdqbiNoAQsBxIi1Ecp1JZnwd`，同一父节点，已 `+node-list` 回查）。
 - 历史技术方案、账号与剪辑专题链接见本文前部「飞书身份、来源与归档」。
 
 本轮已同步：0.9.7 一节（三次拖动返工的根因对比、浮层化与 `dropTarget` 规则、壁纸取景交互与几何模型、静态图重出规格、单测数字与未验收边界）；概览「当前进度」已更新到 0.9.7（92 项单测 / 8 项拖动 + 9 项取景），开发记录追加 2026-10-28 · GetAudio 0.9.7 / GetVideo 0.3.7 一节，新主题在 GetAudio 节点下，正文与父节点均已回查。0.9.5 与 0.9.6 两节此前已同步。GetVideo 未同步飞书（其 AGENTS 要求先取得范围确认）。
+
+0.9.8 已同步：新建「GetAudio 0.9.8：库页手动排序拖动修复与下载失败上报」于 GetAudio 项目节点下（`F9ZZw6Ag7i2WUUkyk2RcNj1UnRf`，正文与父节点已回查）；概览「当前进度」更新到 0.9.8 / 95 项 / 27 warnings 并追加本次更新说明；开发记录追加「2026-10-28 · GetAudio 0.9.8 / GetVideo 0.3.8」一节。
 
 ### 更新日志（客户端日期）
 
