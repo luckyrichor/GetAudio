@@ -37,6 +37,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import com.getaudio.app.audioedit.*
 import com.getaudio.app.data.local.TrackEntity
 import com.getaudio.app.data.repo.TrackRepository
+import com.getaudio.app.data.repo.WaveformCache
 import com.getaudio.app.player.PlayerHolder
 import com.getaudio.app.ui.components.uiAccentContainer
 import com.getaudio.app.ui.components.uiCardColor
@@ -67,6 +68,8 @@ fun AudioEditScreen(track: TrackEntity, onClose: () -> Unit, onSaved: (TrackEnti
     var previewSegments by remember { mutableStateOf(listOf<AudioSegment>()) }
     var loading by remember { mutableStateOf(true) }
     var waveformLoading by remember { mutableStateOf(true) }
+    var waveformProgress by remember { mutableFloatStateOf(0f) }
+    var coarseShown by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var title by remember { mutableStateOf(track.title + "（剪辑）") }
@@ -102,8 +105,30 @@ fun AudioEditScreen(track: TrackEntity, onClose: () -> Unit, onSaved: (TrackEnti
     LaunchedEffect(file, duration) {
         val source = file ?: return@LaunchedEffect
         if (duration <= 0) return@LaunchedEffect
-        try { peaks = AudioEditor.waveform(source, duration) }
-        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        waveformLoading = true
+        waveformProgress = 0f
+        // 之前算过就直接用缓存，不用再解一遍整条音轨。
+        val cached = withContext(Dispatchers.IO) { WaveformCache.read(context, track.id, AudioEditor.WAVEFORM_BUCKETS) }
+        if (cached != null) {
+            peaks = cached
+            waveformProgress = 1f
+            waveformLoading = false
+            return@LaunchedEffect
+        }
+        try {
+            // 先用跳采样把整条形状铺出来（软件解码器解整条要十秒，这一步两秒内），
+            // 用户一进页面就能看到完整轮廓。
+            val coarse = AudioEditor.coarseWaveform(source, duration)
+            val hasCoarse = coarse.any { it > 0f }
+            if (hasCoarse) { peaks = coarse; coarseShown = true }
+            // 再跑精确解码：已经解出来的部分用精确值，还没解到的继续显示粗波形，不会突然变空。
+            peaks = AudioEditor.waveform(source, duration) { partial, progress ->
+                peaks = if (hasCoarse) FloatArray(partial.size) { i -> if (partial[i] > 0f) partial[i] else coarse[i] } else partial
+                waveformProgress = progress
+            }
+            waveformProgress = 1f
+            withContext(Dispatchers.IO) { WaveformCache.write(context, track.id, peaks) }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (e: Exception) { error = "波形读取失败：${e.message}；仍可播放和选择时间" }
         finally { waveformLoading = false }
     }
@@ -135,6 +160,8 @@ fun AudioEditScreen(track: TrackEntity, onClose: () -> Unit, onSaved: (TrackEnti
             try {
                 AudioEditor.export(context, source, clips, duration, output)
                 val saved = repo.saveEdit(track.id, output, name, overwrite)
+                // 覆盖了本地文件：内容变了，旧波形作废，下次进剪辑页重新算。
+                if (overwrite) WaveformCache.forget(context, track.id)
                 onSaved(saved)
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) { error = "保存失败：${e.message}" }
@@ -186,10 +213,28 @@ fun AudioEditScreen(track: TrackEntity, onClose: () -> Unit, onSaved: (TrackEnti
                         border = BorderStroke(1.dp, uiHairline()),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        WaveformEditor(peaks, duration, viewStart, window, segments, active, position, !busy,
-                            onSeek = { originalAt(it, playing) }, onRange = { update(it) })
+                        // 波形生成中：进度条叠在波形底部，不额外占高度，版面不会跳。
+                        Box {
+                            WaveformEditor(peaks, duration, viewStart, window, segments, active, position, !busy,
+                                onSeek = { originalAt(it, playing) }, onRange = { update(it) })
+                            if (waveformLoading) {
+                                LinearProgressIndicator(
+                                    progress = { waveformProgress.coerceIn(0.02f, 1f) },
+                                    modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter),
+                                )
+                            }
+                        }
                     }
-                    if (waveformLoading) Text("正在生成真实波形…", fontSize = 12.sp, color = uiMuted())
+                    // 这行一直留着：生成中显示进度，生成完显示提示，避免版面跳动。
+                    Text(
+                        when {
+                            !waveformLoading -> "波形已就绪，拖动两端调整保留范围"
+                            coarseShown -> "已显示整体轮廓，正在细化 ${(waveformProgress.coerceIn(0f, 1f) * 100).toInt()}%"
+                            else -> "正在生成波形 ${(waveformProgress.coerceIn(0f, 1f) * 100).toInt()}%"
+                        },
+                        fontSize = 12.sp,
+                        color = if (waveformLoading) uiMuted() else MaterialTheme.colorScheme.onSurface,
+                    )
                     Row(
                         Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -203,10 +248,9 @@ fun AudioEditScreen(track: TrackEntity, onClose: () -> Unit, onSaved: (TrackEnti
                             fontSize = 11.sp, color = uiMuted(),
                         )
                     }
-                    if (zoom > 1) {
-                        Text("移动波形视窗", fontSize = 11.sp, color = uiMuted())
-                        Slider(offset, { offset = it }, enabled = !busy)
-                    }
+                    // 一直保留这一行：缩小到 1 倍时滑杆不可拖动，但版面不跳动。
+                    Text("移动波形视窗", fontSize = 11.sp, color = uiMuted())
+                    Slider(offset, { offset = it }, enabled = !busy && zoom > 1f)
                     Surface(
                         shape = RoundedCornerShape(16.dp),
                         color = uiAccentContainer().copy(alpha = 0.6f),
@@ -219,21 +263,27 @@ fun AudioEditScreen(track: TrackEntity, onClose: () -> Unit, onSaved: (TrackEnti
                             Text(" / ${editTime(duration)}", fontSize = 13.sp, color = uiMuted())
                         }
                     }
+                    // 「播放原音频」和「试听剪辑结果」各自是一个完整的播放/暂停开关：
+                    // 正在放哪个，哪个按钮就显示「暂停」，另一个始终显示自己的入口，
+                    // 不会出现「暂停了试听却显示播放原音频」这种指向错乱。
+                    val originalPlaying = !preview && playing
+                    val previewPlaying = preview && playing
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
-                            onClick = { if (playing) player.pause() else originalAt(position, true) },
+                            onClick = { if (originalPlaying) player.pause() else originalAt(position, true) },
                             enabled = !busy,
                             shape = RoundedCornerShape(14.dp),
-                        ) { Text(if (playing) "暂停" else "播放原音频") }
+                        ) { Text(if (originalPlaying) "暂停原音频" else "播放原音频") }
                         OutlinedButton(
                             onClick = {
+                                if (previewPlaying) { player.pause(); return@OutlinedButton }
                                 val clips = valid ?: return@OutlinedButton
                                 previewSegments = clips; preview = true
                                 player.setMediaItems(clips.map { AudioEditor.clippedItem(file!!, it) }); player.prepare(); player.play()
                             },
                             enabled = valid != null && !busy,
                             shape = RoundedCornerShape(14.dp),
-                        ) { Text("试听剪辑结果") }
+                        ) { Text(if (previewPlaying) "暂停试听" else "试听剪辑结果") }
                     }
                     Text(if (preview) "正在试听保留片段，按原时间顺序连续播放" else "边听边选择起点和终点", fontSize = 12.sp, color = uiMuted())
                     Surface(
@@ -318,13 +368,14 @@ fun AudioEditScreen(track: TrackEntity, onClose: () -> Unit, onSaved: (TrackEnti
                             )
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            // 三个按钮同款外观；「应用时间」不再单独给背景色。
                             SheetPill("应用时间", null, {
                                 val start = parseEditTime(startText); val end = parseEditTime(endText)
                                 if (start == null || end == null || start >= end || end > duration) error = "请填写有效的开始和结束时间"
                                 else { update(AudioSegment(start, end)); error = null }
-                            }, primary = true, enabled = !busy)
-                            SheetPill("起点设为当前", null, { update(selected.copy(startMs = position.coerceIn(0, selected.endMs - 1))) }, enabled = !busy && selected.endMs > 0)
-                            SheetPill("终点设为当前", null, { update(selected.copy(endMs = position.coerceIn(selected.startMs + 1, duration))) }, enabled = !busy && selected.startMs < duration)
+                            }, enabled = !busy)
+                            SheetPill("当前位置为起点", null, { update(selected.copy(startMs = position.coerceIn(0, selected.endMs - 1))) }, enabled = !busy && selected.endMs > 0)
+                            SheetPill("当前位置为终点", null, { update(selected.copy(endMs = position.coerceIn(selected.startMs + 1, duration))) }, enabled = !busy && selected.startMs < duration)
                         }
                     }
                     OutlinedButton(
@@ -425,6 +476,10 @@ private fun WaveformEditor(peaks: FloatArray, duration: Long, viewStart: Long, w
         segments.forEachIndexed { index, segment ->
             val left = x(segment.startMs).coerceIn(0f, size.width); val right = x(segment.endMs).coerceIn(0f, size.width)
             if (right > left) drawRect(accent.copy(alpha = if (index == active) 0.22f else 0.09f), Offset(left, 0f), androidx.compose.ui.geometry.Size(right - left, size.height))
+        }
+        if (peaks.isEmpty()) {
+            // 还没解出数据：先画一条中轴骨架，让这块区域看着是「正在加载」而不是「坏了」。
+            drawLine(accent.copy(alpha = 0.28f), Offset(0f, size.height / 2), Offset(size.width, size.height / 2), 2.dp.toPx())
         }
         val columns = (size.width / 3.dp.toPx()).toInt().coerceAtLeast(1)
         for (column in 0 until columns) {

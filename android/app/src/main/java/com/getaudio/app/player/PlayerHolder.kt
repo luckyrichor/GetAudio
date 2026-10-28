@@ -206,6 +206,24 @@ object PlayerHolder {
         indexState.value = index
     }
 
+    /**
+     * 手动切下一首，遵循当前的播放方式：
+     * 随机 → 随机挑一首别的；单曲循环 → 也换歌（用户主动点了「下一首」就是要换）；
+     * 列表循环 / 顺序播放 → 顺次下一首，到末尾回到第一首。
+     */
+    suspend fun next(context: Context) {
+        val list = queueState.value
+        if (list.isEmpty()) return
+        if (list.size == 1) { jump(context, 0); return }
+        val current = indexState.value.coerceIn(0, list.lastIndex)
+        val target = if (modeState.value == Mode.SHUFFLE) {
+            list.indices.filter { it != current }.random()
+        } else {
+            (current + 1) % list.size
+        }
+        jump(context, target)
+    }
+
     /** Move existing Media3 items: the current song, position and paused/playing state survive. */
     suspend fun reorder(context: Context, playlistId: Long?, trackIds: List<Long>): Boolean = appendMutex.withLock {
         if (playlistId == null || playlistId != sourcePlaylistIdState.value) return@withLock false

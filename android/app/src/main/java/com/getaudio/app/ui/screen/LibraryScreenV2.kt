@@ -6,6 +6,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.zIndex
+import kotlinx.coroutines.CancellationException
 import androidx.activity.compose.BackHandler
 import com.getaudio.app.data.repo.DiagnosticsStore
 import androidx.compose.foundation.background
@@ -28,6 +37,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -273,7 +284,7 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
                         }
                     }
                     Spacer(Modifier.weight(1f))
-                    // 导入本地音频：把系统文件选择器里选中的音频复制进库。靠右放，和「云端同步」分居两端。
+                    // 导入本地音频：把系统文件选择器里选中的音频复制进库，靠最右侧。
                     AssistChip(
                         onClick = { importLauncher.launch(arrayOf("audio/*")) },
                         enabled = !importing,
@@ -281,17 +292,22 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
                         leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) },
                         shape = RoundedCornerShape(12.dp),
                     )
-                    Spacer(Modifier.weight(1f))
                 }
                 if (startMs != null || endTimeMs != null) {
                     AreaButton(onClick = { startMs = null; endTimeMs = null }) { Text("${startMs?.let { displayDateTime(it) } ?: "不限"} ~ ${endTimeMs?.let { displayDateTime(it) } ?: "不限"} ×") }
                 }
                 if (allTracks.isEmpty()) EmptyLibrary()
-                else LazyColumn(contentPadding = PaddingValues(bottom = 12.dp)) { items(allTracks, key = { it.id }) { track ->
-                    LibraryAudioRow(track, onPlay = { queueItems(listOf(track), true) }, onMore = { target = LibraryTarget.Audio(track) },
-                        selecting = selecting, selected = track.id in batchIds, selectionEnabled = !deleting,
-                        onSelect = { selectTrack(track.id) })
-                } }
+                else LibraryTrackList(
+                    tracks = allTracks,
+                    selecting = selecting,
+                    batchIds = batchIds,
+                    deleting = deleting,
+                    onReorder = { ids -> trackRepo.reorderLibrary(allTracks.map { it.id }, ids) },
+                    onPlay = { track -> queueItems(listOf(track), true) },
+                    onMore = { track -> target = LibraryTarget.Audio(track) },
+                    onSelect = { id -> selectTrack(id) },
+                    onReorderFailed = { notice = it },
+                )
             } else {
                 val parent = allCategories.firstOrNull { it.id == categoryId }
                 if (parent != null) {
@@ -359,8 +375,8 @@ fun LibraryScreenV2(openCategories: Boolean = false) {
                             )
                         }
                     }
-                    items(categoryTracks, key = { "t${it.id}" }) { track ->
-                        LibraryAudioRow(track, onPlay = { queueItems(listOf(track), true) }, onMore = { target = LibraryTarget.Audio(track) },
+                    itemsIndexed(categoryTracks, key = { _, track -> "t${track.id}" }) { index, track ->
+                        LibraryAudioRow(track, number = index + 1, onPlay = { queueItems(listOf(track), true) }, onMore = { target = LibraryTarget.Audio(track) },
                         selecting = selecting, selected = track.id in batchIds, selectionEnabled = !deleting,
                         onSelect = { selectTrack(track.id) })
                     }
@@ -743,9 +759,139 @@ private fun EmptyLibrary() {
 }
 
 @OptIn(ExperimentalFoundationApi::class)
+/**
+ * 音频列表：左侧序号 + 右侧拖动把手。
+ *
+ * 拖动只从把手开始，否则会和上下滚动抢手势；松手时把新顺序交给 [onReorder] 落库。
+ */
+@Composable
+private fun LibraryTrackList(
+    tracks: List<TrackEntity>,
+    selecting: Boolean,
+    batchIds: Set<Long>,
+    deleting: Boolean,
+    onReorder: suspend (List<Long>) -> Unit,
+    onPlay: (TrackEntity) -> Unit,
+    onMore: (TrackEntity) -> Unit,
+    onSelect: (Long) -> Unit,
+    onReorderFailed: (String) -> Unit,
+) {
+    val state = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    val density = LocalDensity.current
+    val edge = with(density) { 56.dp.toPx() }
+    var draft by remember { mutableStateOf(tracks) }
+    var draggedId by remember { mutableStateOf<Long?>(null) }
+    var center by remember { mutableFloatStateOf(0f) }
+    var finger by remember { mutableFloatStateOf(0f) }
+    var saving by remember { mutableStateOf(false) }
+    val latest by rememberUpdatedState(tracks)
+    val latestReorder by rememberUpdatedState(onReorder)
+
+    // 库数据刷新时同步草稿；正在拖动时不要打断。
+    LaunchedEffect(tracks) { if (draggedId == null) draft = tracks }
+
+    fun moveAtCenter() {
+        val id = draggedId ?: return
+        val target = state.layoutInfo.visibleItemsInfo.firstOrNull {
+            it.key != id && center >= it.offset && center < it.offset + it.size
+        } ?: return
+        val from = draft.indexOfFirst { it.id == id }
+        val to = draft.indexOfFirst { it.id == target.key }
+        if (from >= 0 && to >= 0 && from != to) draft = draft.toMutableList().apply { add(to, removeAt(from)) }
+    }
+    fun commit() {
+        val ids = draft.map { it.id }
+        if (ids == latest.map { it.id } || saving) return
+        saving = true
+        scope.launch {
+            try { latestReorder(ids) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { onReorderFailed("顺序未保存，请重试") }
+            finally { saving = false }
+        }
+    }
+    LaunchedEffect(draggedId) {
+        while (draggedId != null) {
+            withFrameNanos { }
+            val layout = state.layoutInfo
+            val speed = when {
+                finger < layout.viewportStartOffset + edge ->
+                    -((layout.viewportStartOffset + edge - finger) / edge).coerceIn(0f, 1f) * 14f
+                finger > layout.viewportEndOffset - edge ->
+                    ((finger - layout.viewportEndOffset + edge) / edge).coerceIn(0f, 1f) * 14f
+                else -> 0f
+            }
+            if (speed != 0f) { state.scrollBy(speed); moveAtCenter() }
+        }
+    }
+
+    LazyColumn(state = state, contentPadding = PaddingValues(bottom = 12.dp)) {
+        itemsIndexed(draft, key = { _, track -> track.id }) { index, track ->
+            val location = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == track.id }
+            val active = draggedId == track.id
+            LibraryAudioRow(
+                track = track,
+                number = index + 1,
+                onPlay = { onPlay(track) },
+                onMore = { onMore(track) },
+                selecting = selecting,
+                selected = track.id in batchIds,
+                selectionEnabled = !deleting && draggedId == null,
+                onSelect = { onSelect(track.id) },
+                modifier = Modifier
+                    .zIndex(if (active) 1f else 0f)
+                    .graphicsLayer {
+                        translationY =
+                            if (active && location != null) center - location.offset - location.size / 2f
+                            else 0f
+                    },
+                dragHandle = if (selecting) null else ({
+                    Box(
+                        Modifier.size(30.dp).pointerInput(track.id, saving) {
+                            detectDragGestures(
+                                onDragStart = {
+                                    val info = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == track.id }
+                                    if (info != null) {
+                                        draggedId = track.id
+                                        center = info.offset + info.size / 2f
+                                        finger = info.offset + info.size / 2f
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    }
+                                },
+                                onDrag = { change, amount ->
+                                    if (draggedId == track.id) {
+                                        change.consume()
+                                        center += amount.y
+                                        finger += amount.y
+                                        moveAtCenter()
+                                    }
+                                },
+                                onDragEnd = { draggedId = null; commit() },
+                                onDragCancel = { draggedId = null; draft = latest },
+                            )
+                        },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Default.DragHandle,
+                            "拖动排序：${track.title}",
+                            Modifier.size(18.dp),
+                            tint = uiMuted(),
+                        )
+                    }
+                }),
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LibraryAudioRow(track: TrackEntity, onPlay: () -> Unit, onMore: () -> Unit,
-    selecting: Boolean = false, selected: Boolean = false, selectionEnabled: Boolean = true, onSelect: () -> Unit = {}) {
+    selecting: Boolean = false, selected: Boolean = false, selectionEnabled: Boolean = true, onSelect: () -> Unit = {},
+    number: Int = 0, modifier: Modifier = Modifier, dragHandle: (@Composable () -> Unit)? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val queue by PlayerHolder.queue.collectAsState()
@@ -756,7 +902,7 @@ private fun LibraryAudioRow(track: TrackEntity, onPlay: () -> Unit, onMore: () -
     val shape = RoundedCornerShape(16.dp)
 
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 3.dp)
             .clip(shape)
@@ -772,9 +918,20 @@ private fun LibraryAudioRow(track: TrackEntity, onPlay: () -> Unit, onMore: () -
                 onLongClick = onSelect,
                 onLongClickLabel = "选择音频",
             )
-            .padding(start = if (selecting) 8.dp else 10.dp, end = 6.dp, top = 9.dp, bottom = 9.dp),
+            .padding(start = if (selecting) 8.dp else 8.dp, end = 2.dp, top = 9.dp, bottom = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (number > 0 && !selecting) {
+            Text(
+                "$number",
+                Modifier.width(24.dp),
+                textAlign = TextAlign.End,
+                maxLines = 1,
+                style = MaterialTheme.typography.labelMedium,
+                color = uiMuted(),
+            )
+            Spacer(Modifier.width(8.dp))
+        }
         if (selecting) {
             Checkbox(checked = selected, enabled = selectionEnabled, onCheckedChange = { onSelect() })
             Spacer(Modifier.width(4.dp))
@@ -797,32 +954,31 @@ private fun LibraryAudioRow(track: TrackEntity, onPlay: () -> Unit, onMore: () -
                 color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.height(3.dp))
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                val uploader = track.uploader?.takeIf { it.isNotBlank() }
-                if (uploader != null) {
-                    Text(
-                        uploader,
-                        Modifier.weight(1f, fill = false),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = uiMuted(),
-                    )
-                    Text("  ·  ", style = MaterialTheme.typography.bodySmall, color = uiMuted())
-                }
-                val tail = buildList {
-                    track.durationSec?.takeIf { it > 0 }?.let { add(formatDuration(it)) }
-                    add(if (track.addedAtMs > 0) shortAddedTime(track.addedAtMs) else "时间未记录")
-                    if (track.locallyEdited) add("已剪辑")
-                }.joinToString("  ·  ")
+            // 作者 · 时长一行；入库时间单独一行 —— 一行塞不下完整的「年-月-日 时:分」，
+            // 之前被 maxLines=1 截成了「2026-10-27 16:4」。
+            val uploader = track.uploader?.takeIf { it.isNotBlank() }
+            val meta = buildList {
+                if (uploader != null) add(uploader)
+                track.durationSec?.takeIf { it > 0 }?.let { add(formatDuration(it)) }
+                if (track.locallyEdited) add("已剪辑")
+            }.joinToString("  ·  ")
+            if (meta.isNotBlank()) {
                 Text(
-                    tail,
+                    meta,
+                    Modifier.fillMaxWidth(),
                     maxLines = 1,
-                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodySmall,
                     color = uiMuted(),
                 )
             }
+            Text(
+                if (track.addedAtMs > 0) shortAddedTime(track.addedAtMs) else "时间未记录",
+                Modifier.fillMaxWidth(),
+                maxLines = 1,
+                style = MaterialTheme.typography.bodySmall,
+                color = uiMuted(),
+            )
         }
         Box(
             Modifier
@@ -842,6 +998,7 @@ private fun LibraryAudioRow(track: TrackEntity, onPlay: () -> Unit, onMore: () -
             )
         }
         if (!selecting) {
+            dragHandle?.invoke()
             Box(
                 Modifier.size(34.dp).clip(CircleShape).clickable(onClick = onMore),
                 contentAlignment = Alignment.Center,
@@ -857,16 +1014,10 @@ private fun LibraryAudioRow(track: TrackEntity, onPlay: () -> Unit, onMore: () -
     }
 }
 
-/** 入库时间：当天显示「今天 hh:mm」，其余显示「MM-dd hh:mm」。 */
+/** 入库时间：一律显示「yyyy-MM-dd HH:mm」，不用「今天/昨天」这类相对时间。 */
 private fun shortAddedTime(ms: Long): String {
     if (ms <= 0) return "时间未记录"
-    val then = java.util.Calendar.getInstance().apply { timeInMillis = ms }
-    val now = java.util.Calendar.getInstance()
-    val hhmm = String.format("%02d:%02d", then.get(java.util.Calendar.HOUR_OF_DAY), then.get(java.util.Calendar.MINUTE))
-    val sameDay = then.get(java.util.Calendar.YEAR) == now.get(java.util.Calendar.YEAR) &&
-        then.get(java.util.Calendar.DAY_OF_YEAR) == now.get(java.util.Calendar.DAY_OF_YEAR)
-    return if (sameDay) "今天 $hhmm"
-    else String.format("%02d-%02d %s", then.get(java.util.Calendar.MONTH) + 1, then.get(java.util.Calendar.DAY_OF_MONTH), hhmm)
+    return java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ms))
 }
 
 @Composable

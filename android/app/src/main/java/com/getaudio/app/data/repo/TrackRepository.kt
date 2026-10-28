@@ -49,6 +49,30 @@ class TrackRepository(private val context: Context) {
 
     suspend fun allNow(): List<TrackEntity> = trackDao.allNow()
 
+    /**
+     * 保存列表的手动顺序。
+     *
+     * 只替换「可见项」在原全量顺序里占的位置，其余记录原地不动 —— 这样在搜索结果或
+     * 类别里拖动，不会把没显示的音频挤到别处。最后整库重编号 1..N，
+     * 排序规则就变成纯粹的 sortIndex。
+     */
+    suspend fun reorderLibrary(visibleIds: List<Long>, newVisibleOrder: List<Long>) {
+        if (visibleIds.isEmpty() || visibleIds.size != newVisibleOrder.size) return
+        if (visibleIds.toSet() != newVisibleOrder.toSet()) return
+        val visible = visibleIds.toSet()
+        val full = trackDao.allNow().sortedWith(
+            compareBy<TrackEntity> { it.sortIndex }
+                .thenByDescending { it.addedAtMs }
+                .thenByDescending { it.id },
+        ).map { it.id }.toMutableList()
+        val slots = full.indices.filter { full[it] in visible }
+        if (slots.size != newVisibleOrder.size) return
+        slots.forEachIndexed { i, slot -> full[slot] = newVisibleOrder[i] }
+        db.withTransaction {
+            full.forEachIndexed { i, id -> trackDao.setSortIndex(id, i + 1L) }
+        }
+    }
+
     suspend fun byId(id: Long): TrackEntity? = trackDao.byId(id)
 
     suspend fun rename(id: Long, title: String) {
