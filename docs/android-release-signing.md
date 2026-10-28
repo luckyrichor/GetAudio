@@ -102,10 +102,13 @@ $ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs \
 ```bash
 git tag -a v0.9.9 -m "GetAudio 0.9.9：……" && git push origin main v0.9.9
 
+# 先把产物复制成带版本号的名字再上传
+cp android/app/build/outputs/apk/release/app-release.apk /tmp/getaudio-0.9.9-release.apk
+
 gh release create v0.9.9 \
   --title "GetAudio v0.9.9" \
   --notes-file /tmp/rel-audio.md \
-  android/app/build/outputs/apk/release/app-release.apk#getaudio-0.9.9-release.apk
+  /tmp/getaudio-0.9.9-release.apk
 ```
 
 约定（与历史 Release 保持一致）：
@@ -114,8 +117,14 @@ gh release create v0.9.9 \
 - 说明分「更新内容 / 验证」两段，末尾一句「与上一版同签名，可直接覆盖安装」
 - GetVideo 同理：`getvideo-0.3.9-release.apk`、标题 `GetVideo v0.3.9`
 
-`gh release create` 前先确认 `assembleRelease` 产物就是当前版本（`versionName` 对得上），
-否则会把旧包挂到新 tag 上。
+两个坑：
+
+- **`文件#名字` 不会改下载文件名**。`gh release create ... app-release.apk#foo.apk` 只是给资产
+  加了个 label，用户点下载拿到的还是 `app-release.apk`（0.9.9 首次发布就踩了，事后
+  `gh release delete-asset` + 重传带版号的副本才修好）。想要正确的文件名，就先把文件复制成目标
+  名字再上传。
+- **上传前确认产物版本**：`assembleRelease` 之后对一下
+  `output-metadata.json` 里的 `versionName`，否则会把旧包挂到新 tag 上。
 
 ## 迁移注意
 
