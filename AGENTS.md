@@ -158,3 +158,11 @@ sh android/gradlew -p android testDebugUnitTest lintDebug assembleDebug assemble
 - 媒体下载抗断流：`DirectExtractor.download()` 每地址最多 3 次（仅 `IOException`，400/800ms 退避），带 `Connection: close` + `Accept-Encoding: identity`，日志记「已收 N 字节」；`ApiProvider.humanMessage` 增加 `SocketException / EOFException / SSLException` 中文映射（原来把英文 `software caused connection abort` 直接弹给用户）。
 - 服务器回查：0.9.7 的三条失败报告都在（`媒体下载 1/1：SocketException` → `所有下载地址均失败：Software caused connection abort`，12:26–12:27 UTC 上传成功），证明提取失败上报链路本来就是通的，缺的是库内下载这条支路。
 - 验证：Android 95 项单测、Lint 0 errors / 27 warnings、debug+release 构建成功，同签名升级到 0.9.8 (36)。真机 1440×3200 / Android 14 用 `input draganddrop` 长按拖库页首条，只移动一格（1→2）且重启进程后顺序保持；`input motionevent` 逐事件注入因 `downTime` 不一致无法驱动 Compose 手势，自动化改用 `draganddrop`。GetVideo 同步 0.3.8 (15)，82 项单测、Lint 0 errors/25 warnings。
+
+- 2026-10-28（0.9.9）：0.9.8 之后用户又复现「第一条往下拖，文件跟着手指走但原位变空；拖到 7、8 之间画面还停在最上面」，以及「把别的项拖到第一条再拖回往下移，第一条位置留下一大段透明空白、序号乱」。临时加 `Log.d` + 真机 `input swipe` 慢速拖动抓日志，确认是两个独立根因。
+- 根因一：`itemsIndexed` 带了 `key`，`LazyColumn` 换位会把「第一个可见项」按 key 钉回原像素 —— 拖第一条时第一个可见项正是被拖行，于是每换一格列表自己往下滚一行（日志 `firstVisibleItemIndex` 0→1→2，`scrollBy` 之外的隐性滚动）。画面被推走、占位行留在原地，所以顶部空一大块。修法：`itemsIndexed(draft)` **不传 key**，key 退化成下标，换位不改变下标 → 列表永不自己滚。
+- 根因二：相邻行高不同（两行标题 283px / 三行标题 353px），换位后布局重排，手指停在「换过去换回来都成立」的重叠区，每帧来回换（日志 `from=3→4→3→4…` 十余次，就是看起来的抖动）。修法：加**反向换位死区**——换位后需再移动 `0.5 × min(被拖行高, 目标行高)` 才允许换回，同向换位不限，快拖仍跟手。
+- 判定随之简化：删掉 `residual`（「自上次换位以来的位移」不再需要），直接用手指在视口里的真实纵坐标 `dropTarget(from, pointerY, slots, inset)`。`ReorderableQueue` 同改（去 key、去 residual、加死区、`beginDrag(index)`）。注意 `beginDrag` 改为按下标命中，`onDragStart` 用 `visibleItemsInfo` 的 `index`。
+- 测试：`QueueDragStepTest` 的 `AnchoredSim`（模拟锚定）换成 `StableSim`，新增「占位行始终在手指下面」「换位不让列表自己滚」「手指不动不换位」「带 key 会滚走（反证）」四条；总 96 项。
+- 真机验证（0.9.9，1440×3200 / Android 14）：① 首条下拖两行：占位行始终在手指下、顶部由下一行补齐、序号 1..5 连续；② 第 5 条拖到第 1 位：占位行一路跟到第一格、顶部不空；③ 再把第 1 条拖回第 4 位：无空白、无序号错乱；④ `am force-stop` 重启后顺序保持。Lint 0 errors / 27 warnings，release 0.9.9 (37)，32.8 MB。
+- 自动化注记：`adb shell input draganddrop` 有时不触发长按（`downTime` 与 slop 相关），`input swipe x1 y1 x2 y2 30000` 这种「总时长 30 秒、前 500ms 位移 < 28px」的慢速滑动最稳，可稳定触发 `detectDragGesturesAfterLongPress`；`input motionevent` 逐事件注入不可用（每次 `downTime` 不同）。GetVideo 同步 0.3.9 (16)，83 项单测、Lint 0 errors / 25 warnings。
