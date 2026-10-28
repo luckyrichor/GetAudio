@@ -101,9 +101,10 @@ sh android/gradlew -p android testDebugUnitTest lintDebug assembleDebug assemble
 
 - 项目概览：<https://kcn0pbn0hwo0.feishu.cn/wiki/KuYawq8kvihfeKkq4vXcS0Vtn1d>。
 - 开发记录（以后持续追加）：<https://kcn0pbn0hwo0.feishu.cn/wiki/LRmyw4wfhiBcwIkyz83cQ4IOnUm>。
+- 0.9.0–0.9.4 主题：<https://kcn0pbn0hwo0.feishu.cn/wiki/Dc5hwuLCsisTibkNXnzc57a8nqV>（docx `QE7QdPpI5oFY27xocK0cKN4znbo`，父节点已回查为 GetAudio 项目节点）。
 - 历史技术方案、账号与剪辑专题链接见本文前部「飞书身份、来源与归档」。
 
-本轮已同步：图文 404 修复、自动失败报告、真实部署/入库/上报结果及完整交接概览；内容回查与父节点回查均已完成。无飞书待同步项。
+本轮已同步：0.9.x 文档补齐、本地测试数字、未验收边界与 GitHub 链接；概览「当前进度」已更新到 0.9.4，开发记录追加 2026-10-28 一节，新主题在 GetAudio 节点下，三篇正文均已回查。
 
 ### 更新日志（客户端日期）
 
