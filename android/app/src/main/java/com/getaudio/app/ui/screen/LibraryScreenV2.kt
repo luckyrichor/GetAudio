@@ -11,6 +11,10 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.zIndex
@@ -924,6 +928,13 @@ private fun EmptyLibrary() {
  *
  * 拖动靠**长按**整行触发（不再单独放把手），松手时把新顺序交给 [onReorder] 落库；
  * 按字段排序时（[dragEnabled] = false）拖动无意义，自动关掉。
+ *
+ * 两条规则是 2026-10-28 真机复现后定下来的（此前「第一个往下拖立刻跳到最后」）：
+ *  1. **被拖行移出列表**，画在浮层里；原位放等高的 `Spacer` 占位。列表的
+ *     `translationY` 补偿在换位当帧必然按旧槽位算，会先跳出去再跳回来。
+ *  2. 落位基准 = 被拖行**当前槽位中心 + 自上次换位以来的手指位移**，换位后清零。
+ *     不能直接用屏幕坐标：LazyColumn 换位时会把「第一个可见项」钉在原像素上，
+ *     槽位坐标整体平移，屏幕坐标会指到后面好几行去，于是每帧再换一格，一路窜到底。
  */
 @Composable
 private fun LibraryTrackList(
@@ -943,10 +954,16 @@ private fun LibraryTrackList(
     val haptics = LocalHapticFeedback.current
     val density = LocalDensity.current
     val edge = with(density) { 56.dp.toPx() }
+    val maxSpeed = with(density) { 9.dp.toPx() }
+    val inset = with(density) { 2.dp.toPx() }
     var draft by remember { mutableStateOf(tracks) }
     var draggedId by remember { mutableStateOf<Long?>(null) }
-    var center by remember { mutableFloatStateOf(0f) }
-    var finger by remember { mutableFloatStateOf(0f) }
+    // 被拖行中心的屏幕坐标（相对列表视口），只跟手指走，用来画浮层。
+    var pointerY by remember { mutableFloatStateOf(0f) }
+    var dragHeight by remember { mutableFloatStateOf(0f) }
+    // 自上次换位以来手指走了多少（正 = 往下），判定用，换位后清零。
+    var residual by remember { mutableFloatStateOf(0f) }
+    var boxHeight by remember { mutableIntStateOf(0) }
     var saving by remember { mutableStateOf(false) }
     val latest by rememberUpdatedState(tracks)
     val latestReorder by rememberUpdatedState(onReorder)
@@ -954,15 +971,6 @@ private fun LibraryTrackList(
     // 库数据刷新时同步草稿；正在拖动时不要打断。
     LaunchedEffect(tracks) { if (draggedId == null) draft = tracks }
 
-    fun moveAtCenter() {
-        val id = draggedId ?: return
-        val target = state.layoutInfo.visibleItemsInfo.firstOrNull {
-            it.key != id && center >= it.offset && center < it.offset + it.size
-        } ?: return
-        val from = draft.indexOfFirst { it.id == id }
-        val to = draft.indexOfFirst { it.id == target.key }
-        if (from >= 0 && to >= 0 && from != to) draft = draft.toMutableList().apply { add(to, removeAt(from)) }
-    }
     fun commit() {
         val ids = draft.map { it.id }
         if (ids == latest.map { it.id } || saving) return
@@ -974,67 +982,122 @@ private fun LibraryTrackList(
             finally { saving = false }
         }
     }
+    fun beginDrag(id: Long) {
+        val info = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id } ?: return
+        draggedId = id
+        pointerY = info.offset + info.size / 2f
+        dragHeight = info.size.toFloat()
+        residual = 0f
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+    }
+    // 每一帧：先按贴边程度滚列表，再按「手指落在哪一行」落位。
     LaunchedEffect(draggedId) {
-        while (draggedId != null) {
+        val id = draggedId ?: return@LaunchedEffect
+        while (true) {
             withFrameNanos { }
+            if (draggedId != id) break
             val layout = state.layoutInfo
+            val top = layout.viewportStartOffset.toFloat()
+            val bottom = layout.viewportEndOffset.toFloat()
+            if (bottom <= top) continue
             val speed = when {
-                finger < layout.viewportStartOffset + edge ->
-                    -((layout.viewportStartOffset + edge - finger) / edge).coerceIn(0f, 1f) * 14f
-                finger > layout.viewportEndOffset - edge ->
-                    ((finger - layout.viewportEndOffset + edge) / edge).coerceIn(0f, 1f) * 14f
+                pointerY < top + edge -> -(((top + edge - pointerY) / edge).coerceIn(0f, 1f)) * maxSpeed
+                pointerY > bottom - edge -> (((pointerY - bottom + edge) / edge).coerceIn(0f, 1f)) * maxSpeed
                 else -> 0f
             }
-            if (speed != 0f) { state.scrollBy(speed); moveAtCenter() }
+            if (speed != 0f) {
+                state.scrollBy(speed)
+                // 内容往上滚 = 手指相对内容往下走，等价于手指位移。
+                residual += speed
+            }
+            val from = draft.indexOfFirst { it.id == id }
+            if (from < 0) break
+            val slots = layout.visibleItemsInfo.map {
+                QueueSlot(it.index, it.offset.toFloat(), it.size.toFloat())
+            }
+            val slot = slots.firstOrNull { it.index == from } ?: continue
+            val y = slot.top + slot.height / 2f + residual
+            val target = dropTarget(from, y, slots, inset) ?: continue
+            // 换位后保留「手指落在这一行的哪个位置」，同时丢掉槽位绝对值（锚点会整体平移）。
+            val targetSlot = slots.firstOrNull { it.index == target }
+            draft = draft.toMutableList().apply { add(target, removeAt(from)) }
+            residual = if (targetSlot != null) y - (targetSlot.top + targetSlot.height / 2f) else 0f
         }
     }
 
-    LazyColumn(state = state, contentPadding = PaddingValues(bottom = 12.dp)) {
-        itemsIndexed(draft, key = { _, track -> track.id }) { index, track ->
-            val location = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == track.id }
-            val active = draggedId == track.id
+    Box(Modifier.fillMaxSize().onSizeChanged { boxHeight = it.height }) {
+        LazyColumn(
+            state = state,
+            contentPadding = PaddingValues(bottom = 12.dp),
+            // 手势挂在列表上，而不是挂在某一行上：拖动开始后被拖行会换成等高的占位 Spacer，
+            // 挂在行上会在第一次换位时随节点一起销毁，拖动当场中断（表现为「拖一下就自己停了」）。
+            modifier = Modifier.pointerInput(dragEnabled, selecting, deleting, saving) {
+                if (dragEnabled && !selecting && !deleting) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { offset ->
+                            val infos = state.layoutInfo.visibleItemsInfo
+                            val hit = infos.firstOrNull { offset.y >= it.offset && offset.y < it.offset + it.size }
+                                ?: infos.minByOrNull { abs(it.offset + it.size / 2f - offset.y) }
+                            if (!saving) hit?.let { beginDrag(it.key as Long) }
+                        },
+                        onDrag = { change, amount ->
+                            if (draggedId != null) {
+                                change.consume()
+                                // 一次事件只挪位置，换位交给每帧的循环。
+                                pointerY += amount.y
+                                residual += amount.y
+                            }
+                        },
+                        onDragEnd = {
+                            if (draggedId != null) {
+                                draggedId = null
+                                commit()
+                            }
+                        },
+                        onDragCancel = { draggedId = null; residual = 0f; draft = latest },
+                    )
+                }
+            },
+        ) {
+            itemsIndexed(draft, key = { _, track -> track.id }) { index, track ->
+                if (draggedId == track.id) {
+                    // 占位：保住原来的高度，上下行原地不动。
+                    Spacer(Modifier.fillMaxWidth().height(with(density) { dragHeight.toDp() }))
+                } else {
+                    LibraryAudioRow(
+                        track = track,
+                        number = index + 1,
+                        onPlay = { onPlay(track) },
+                        onMore = { onMore(track) },
+                        selecting = selecting,
+                        selected = track.id in batchIds,
+                        selectionEnabled = !deleting && draggedId == null,
+                        onSelect = { onSelect(track.id) },
+                    )
+                }
+            }
+        }
+        // 浮起来的被拖行：位置只跟手指走，不跟列表布局纠缠，所以不会抖。
+        val dragged = draft.firstOrNull { it.id == draggedId }
+        if (dragged != null && dragHeight > 0f) {
+            val limit = (boxHeight - dragHeight).coerceAtLeast(0f)
+            val topPx = (pointerY - dragHeight / 2f).coerceIn(0f, limit)
             LibraryAudioRow(
-                track = track,
-                number = index + 1,
-                onPlay = { onPlay(track) },
-                onMore = { onMore(track) },
+                track = dragged,
+                number = draft.indexOfFirst { it.id == dragged.id } + 1,
+                onPlay = { },
+                onMore = { },
                 selecting = selecting,
-                selected = track.id in batchIds,
-                selectionEnabled = !deleting && draggedId == null,
-                onSelect = { onSelect(track.id) },
+                selected = dragged.id in batchIds,
+                selectionEnabled = false,
+                onSelect = { },
                 modifier = Modifier
-                    .zIndex(if (active) 1f else 0f)
+                    .zIndex(2f)
+                    .offset { IntOffset(0, topPx.roundToInt()) }
                     .graphicsLayer {
-                        translationY =
-                            if (active && location != null) center - location.offset - location.size / 2f
-                            else 0f
-                        scaleX = if (active) 1.02f else 1f
-                        scaleY = if (active) 1.02f else 1f
-                        shadowElevation = if (active) 14f else 0f
-                    },
-                dragModifier = if (!dragEnabled || selecting || deleting) Modifier else Modifier
-                    .pointerInput(track.id, saving) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = {
-                                val info = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == track.id }
-                                if (info != null) {
-                                    draggedId = track.id
-                                    center = info.offset + info.size / 2f
-                                    finger = info.offset + info.size / 2f
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                }
-                            },
-                            onDrag = { change, amount ->
-                                if (draggedId == track.id) {
-                                    change.consume()
-                                    center += amount.y
-                                    finger += amount.y
-                                    moveAtCenter()
-                                }
-                            },
-                            onDragEnd = { draggedId = null; commit() },
-                            onDragCancel = { draggedId = null; draft = latest },
-                        )
+                        scaleX = 1.02f
+                        scaleY = 1.02f
+                        shadowElevation = 16f
                     },
             )
         }
@@ -1045,7 +1108,7 @@ private fun LibraryTrackList(
 @Composable
 private fun LibraryAudioRow(track: TrackEntity, onPlay: () -> Unit, onMore: () -> Unit,
     selecting: Boolean = false, selected: Boolean = false, selectionEnabled: Boolean = true, onSelect: () -> Unit = {},
-    number: Int = 0, modifier: Modifier = Modifier, dragModifier: Modifier = Modifier,
+    number: Int = 0, modifier: Modifier = Modifier,
     longPressSelects: Boolean = false) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1059,7 +1122,6 @@ private fun LibraryAudioRow(track: TrackEntity, onPlay: () -> Unit, onMore: () -
     Row(
         modifier
             .fillMaxWidth()
-            .then(dragModifier)
             .padding(horizontal = 8.dp, vertical = 3.dp)
             .clip(shape)
             .background(if (highlighted) uiAccentContainer() else uiCardColor())
@@ -1071,7 +1133,7 @@ private fun LibraryAudioRow(track: TrackEntity, onPlay: () -> Unit, onMore: () -
             .padding(start = 4.dp, end = 2.dp, top = 9.dp, bottom = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 长按整行 = 拖动排序（由外层的 dragModifier 处理），所以这里不再挂 onLongClick；
+        // 长按整行 = 拖动排序（由列表上的长按手势处理），所以这里不再挂 onLongClick；
         // 多选改从「更多 → 多选」进入。只有类别视图的小列表保留长按多选（longPressSelects）。
         Row(
             Modifier.weight(1f).combinedClickable(

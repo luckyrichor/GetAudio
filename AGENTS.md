@@ -87,7 +87,7 @@ sh android/gradlew -p android testDebugUnitTest lintDebug assembleDebug assemble
 
 ### 当前进度、下一步与验证
 
-- 已交付：0.8.2 B 站 412/分 P、0.8.3 抖音图文音乐、0.8.4 拖拽、0.8.5 退出恢复（`c9a3a29` 真机恢复 18 首及 01:06）、0.8.6 授权入口崩溃修复（`7bcd659`）、0.8.7 图文 `ies-music-hj` 与失败自动上报（`f72a73e`）、0.9.0 批量提取/自定义背景/导入本地音频/412 加固（`7840de1`）、0.9.1–0.9.4 库页排序与剪辑页重构（`707577d`、`b982a85`、`cd1f82b`、`23ed6c9`）、0.9.5 队列去把手与动态背景、0.9.6 拖动返工与内置壁纸、0.9.7 拖动第三次返工与壁纸取景。
+- 已交付：0.8.2 B 站 412/分 P、0.8.3 抖音图文音乐、0.8.4 拖拽、0.8.5 退出恢复（`c9a3a29` 真机恢复 18 首及 01:06）、0.8.6 授权入口崩溃修复（`7bcd659`）、0.8.7 图文 `ies-music-hj` 与失败自动上报（`f72a73e`）、0.9.0 批量提取/自定义背景/导入本地音频/412 加固（`7840de1`）、0.9.1–0.9.4 库页排序与剪辑页重构（`707577d`、`b982a85`、`cd1f82b`、`23ed6c9`）、0.9.5 队列去把手与动态背景、0.9.6 拖动返工与内置壁纸、0.9.7 拖动第三次返工与壁纸取景、0.9.8 库页手动排序拖动修复与下载失败上报。
 - 本轮（2026-10-28）：先补 0.9.1–0.9.4 文档（`40f1bb4`、`18275b0`），再做 0.9.5 与 0.9.6：
   - 0.9.5 删掉队列行首 `DragHandle` 把手，拖动改为只走长按整行；新增视频/动图动态背景。
   - 0.9.6 拖动返工：0.9.5 把贴边滚动的像素补进被拖行中心，导致中心漂出视口后「取最近边缘行」，首条下拖直接窜到末条；跨行换位又让布局重排、下一帧反向判定，末条上拖剧烈抖动。现在中心只跟手指走（`scrollBy` 不回写）、夹在可视区内、只和紧邻上下行比、越中线也只挪一格，目标行不可见时不动。
@@ -119,9 +119,10 @@ sh android/gradlew -p android testDebugUnitTest lintDebug assembleDebug assemble
 - 0.9.0–0.9.4 主题：<https://kcn0pbn0hwo0.feishu.cn/wiki/Dc5hwuLCsisTibkNXnzc57a8nqV>（docx `QE7QdPpI5oFY27xocK0cKN4znbo`，父节点已回查为 GetAudio 项目节点）。
 - 0.9.5 主题：<https://kcn0pbn0hwo0.feishu.cn/wiki/FFJdwBRXYifVSbkypN7cWuL8nKh>（docx `EjlqdUqq2oYxEJx76PQcvfYonlf`，同一父节点）。
 - 0.9.6 主题：<https://kcn0pbn0hwo0.feishu.cn/wiki/Zrclwa2wLiwqkIkRpPUcRnA3nwd>（docx `SBMQdHuimo2T4Dx3H38cz2dnnKd`，同一父节点）。
+- 0.9.7 主题：<https://kcn0pbn0hwo0.feishu.cn/wiki/Hpb1wBJn1icT5Ckdx4AcpQ4Wnkb>（docx `XSVydmlcMo5MLUxDuCScblmynld`，同一父节点，已 `+node-list` 回查）。
 - 历史技术方案、账号与剪辑专题链接见本文前部「飞书身份、来源与归档」。
 
-本轮已同步：0.9.5 与 0.9.6 两节，含拖动返工根因、内置壁纸规格、静音实现、单测数字与未验收边界；概览「当前进度」已更新到 0.9.6，开发记录追加 2026-10-28 · 0.9.6 一节，新主题在 GetAudio 节点下，正文与父节点均已回查。GetVideo 未同步飞书（其 AGENTS 要求先取得范围确认）。
+本轮已同步：0.9.7 一节（三次拖动返工的根因对比、浮层化与 `dropTarget` 规则、壁纸取景交互与几何模型、静态图重出规格、单测数字与未验收边界）；概览「当前进度」已更新到 0.9.7（92 项单测 / 8 项拖动 + 9 项取景），开发记录追加 2026-10-28 · GetAudio 0.9.7 / GetVideo 0.3.7 一节，新主题在 GetAudio 节点下，正文与父节点均已回查。0.9.5 与 0.9.6 两节此前已同步。GetVideo 未同步飞书（其 AGENTS 要求先取得范围确认）。
 
 ### 更新日志（客户端日期）
 
@@ -144,3 +145,10 @@ sh android/gradlew -p android testDebugUnitTest lintDebug assembleDebug assemble
 - 详见 `docs/android-release-signing.md`。
 
 - 2026-10-28（0.9.7）：拖动第三次返工 —— 被拖行移出列表改走浮层、落点改为「手指所在行」且只从可视行里选，根治首条下拖窜到 26–30 条与上拖疯狂抖动；壁纸新增「调整显示区域」（旋转/缩放/选框，每张背景单独记忆）；静态壁纸重出 2200 长边。Android 92 项单测、Lint 0 errors/28 warnings 通过，release 0.9.7 (35)。GetVideo 同步 0.3.7 (14)。
+
+- 2026-10-28（0.9.8）：用户澄清「第一条往下拖立刻跳到最后」是**库页手动排序**（`LibraryScreenV2.LibraryTrackList`），不是队列面板。该处另写了一套拖动：行留在列表里做 `translationY` 补偿、落点拿屏幕绝对值命中行，`LazyColumn` 换位把首个可见项钉在原像素后坐标整体平移，判定每帧指到后面几行。改为与队列同一模型（浮层 + 等高占位 + `dropTarget(from, 槽位中心 + residual, ...)`，换位只保留手指在新一行内的偏移）。
+- 同轮发现并修掉第二个 bug：手势原本挂在每行 `pointerInput`，拖动开始该行被换成 `Spacer` 离屏，节点随销毁，第一次换位后拖动即断（「拖一下就自己停」）。检测器改挂 `LazyColumn`，`onDragStart` 用 `visibleItemsInfo` 命中最近行。
+- 下载失败补上自动上报：`TrackRepository.download()` 失败时把「阶段 / HTTP / 已收字节 / 期望字节 / 耗时 / 主机 / 异常」写入 `failure-outbox` 并唤醒 `FailureReportWorker`，`share_text` 用曲目 `sourceUrl`；同曲目同错误 10 分钟内只报一次（进程内上限 30 条），取消不上报。此前只有手机直提取失败会入队，库内下载失败在服务器上查不到。
+- 媒体下载抗断流：`DirectExtractor.download()` 每地址最多 3 次（仅 `IOException`，400/800ms 退避），带 `Connection: close` + `Accept-Encoding: identity`，日志记「已收 N 字节」；`ApiProvider.humanMessage` 增加 `SocketException / EOFException / SSLException` 中文映射（原来把英文 `software caused connection abort` 直接弹给用户）。
+- 服务器回查：0.9.7 的三条失败报告都在（`媒体下载 1/1：SocketException` → `所有下载地址均失败：Software caused connection abort`，12:26–12:27 UTC 上传成功），证明提取失败上报链路本来就是通的，缺的是库内下载这条支路。
+- 验证：Android 95 项单测、Lint 0 errors / 27 warnings、debug+release 构建成功，同签名升级到 0.9.8 (36)。真机 1440×3200 / Android 14 用 `input draganddrop` 长按拖库页首条，只移动一格（1→2）且重启进程后顺序保持；`input motionevent` 逐事件注入因 `downTime` 不一致无法驱动 Compose 手势，自动化改用 `draganddrop`。GetVideo 同步 0.3.8 (15)，82 项单测、Lint 0 errors/25 warnings。

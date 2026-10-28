@@ -22,6 +22,35 @@
 {"id":"b6656ba1-47de-41d2-9ac5-ecc4331dbad9","version":"0.8.7","occurred_at_ms":1793050000000,"share_text":"分享 https://v.douyin.com/example/","logs":["媒体下载：HTTP 404"]}
 ```
 
+## 0.9.8：下载失败也自动上报
+
+0.8.7 只覆盖「手机直提取」本身失败。但用户看到的 `Software caused connection abort` 有两处来源，
+其中**音频库下载**（`TrackRepository.download`：手动下载、加入播放列表、播放前缓存）失败时只弹一句提示，
+不进队列，服务器上什么都查不到。0.9.8 把它接进同一条链路：
+
+- `download()` 记录 `阶段 / HTTP 状态 / 已接收字节 / 期望字节 / 耗时 / 主机`，失败时写 `failure-outbox` 并唤醒
+  `FailureReportWorker`；`share_text` 用曲目的原始分享地址，没有就写「音频下载失败：<标题>（id=…）」。
+- 同一曲目 + 同一异常 + 同一提示 **10 分钟内只报一次**，进程内最多 30 条，断网反复重试不会刷满队列。
+- 取消（`CancellationException`）不算失败，不上报。
+
+同时修掉「媒体下载」本身的脆弱点（`DirectExtractor.download`）：
+
+| 问题 | 0.9.8 |
+|---|---|
+| 每个地址只试一次，CDN 在响应头之后 RST 就整条失败 | 每个地址最多 3 次（400ms / 800ms 退避），仅对 `IOException` 重试，HTTP 4xx 不浪费次数 |
+| 复用连接，坏连接会被下一条继续用 | 媒体请求带 `Connection: close` + `Accept-Encoding: identity`，每次一条新连接 |
+| 日志只有异常类名 | 额外记「已收 N 字节」，看得出是「一个字节没收到」还是「下到一半断了」 |
+
+`ApiProvider.humanMessage` 补了中文映射：`SocketException` → 「网络连接被中断，请重试」、
+`EOFException` → 「下载中断」、`SSLException` → 「安全连接失败」。原来这类错误直接把英文原文弹给用户，
+所以才会看到“software”字样；原始异常与 message 仍完整写进失败报告，排查信息没有丢。
+
+### 回查结论（2026-10-28）
+
+用下面的 SSH 命令查服务器，0.9.7 的三条失败记录都在（12:26–12:27 UTC 上传成功），
+日志里正是 `媒体下载 1/1：SocketException` → `所有下载地址均失败：Software caused connection abort`。
+说明**提取失败的上报链路是通的**，缺的是上面那条「库内下载失败」的支路。
+
 ## 服务器排查（SSH 管理员，只读）
 
 ```bash
