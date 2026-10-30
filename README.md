@@ -77,6 +77,20 @@ cd android
 
 状态码有含义：`400` 链接解析不了，`401` 需检查平台登录、GetAudio 账号或 nginx 访问凭据，`501` 该平台不支持这种登录方式，`502` 平台侧提取失败。新增账号与 Agent 接口见 [接口说明](docs/agent-and-accounts.md#http-接口)。
 
+### 博主批量与 v2 接口（后端先行）
+
+服务端新增一组账号隔离的 `/v2/...` 接口：只给抖音号（或主页 URL）就能按范围批量下载该博主的作品音频，图文/图集配乐也会收；同时补齐 `/v2/resolve`、曲目读写/逻辑删除/恢复、提取任务、维护和定时抓取。完整 curl 示例见 [HTTP API 说明](docs/http-api.md)。
+
+- 输入字段 `url` / `input` / `text` 任选其一；裸数字必须带 `platform=douyin|bilibili`，否则 400。
+- 抖音号先走公开的 `iesdouyin user/info` 换 `sec_uid`，失败才回退浏览器搜索（要登录 Cookie）。
+- 抖音主页用 Playwright 捕获页面自己签名的 `aweme/post` 响应；窗口按 `create_time` 倒序，置顶作品不会打乱范围。
+- 下载复用 `pipeline.extract()` + `DouyinExtractor`；列表里已带播放地址时不再请求 `aweme/detail`。
+- 任务单线程顺序执行，进程重启把 `running` 恢复为 `pending`；单条失败不影响整批，授权失效整批标 `failed` 可重试。
+
+这些路由目前不在 Android DTO 中，作为**后端先行接口**在 `tests/test_api_contract.py` 里显式跳过。
+
+**实测（2026-10-30，临时数据库 + 临时音频目录）**：抖音号 `67194609689` 经公开 `user/info` 换成 `sec_uid`（不需要登录）；Playwright 抓到主页 259 条作品，最新一条 `7699794704686239011`（2026-10-23，17.1s）按预取 aweme 下载为 MP3，415,059 字节，`ffprobe` 实测 17.16s、含 mp3 音频流；验证后临时库和音频已删除。该次没有使用登录 Cookie，属于匿名出口可用的情况；换 IP/账号仍可能遇到验证码（见 `docs/http-api.md`）。
+
 ## 目录
 
 ```
@@ -162,6 +176,8 @@ cd android && ./gradlew testDebugUnitTest assembleDebug
 - Android 构建通过、接口字段契约已校验；尚未做真机/模拟器交互和 Room 迁移实测，不能用编译通过替代实机验收
 - 手机端仅处理公开可访问作品；抖音/B 站接口及风控可能变化，登录专属作品不支持。手机抽取视频内 AAC 音轨时无损封装成 M4A，其他视频音频编码暂不支持
 - **合规**：扒 B 站 / 抖音音频两边 ToS 都不允许。自用风险不大，做成多用户服务或再分发则不然
+- 博主批量的抖音主页依赖 Playwright + Chromium 和登录 Cookie；未安装、遇到验证码或出口 IP 被风控时返回 503，真实账号/出口未验收
+- 图文配乐按 `music.play_url` 或 `video.play_addr*` 判定；两者都没有的作品仍会被跳过（没有可下载音频）
 
 
 ## 分类与相似音频

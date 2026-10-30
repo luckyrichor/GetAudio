@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import agent, credentials, login
-from . import accounts, extraction_agent
+from . import accounts, extraction_agent, creator_worker
 from .config import settings
 from .db import SessionLocal, init_db
 from .extractors import ExtractorError, NeedsLoginError
@@ -36,7 +36,11 @@ log = logging.getLogger(__name__)
 async def lifespan(_: FastAPI):
     init_db()
     settings.ensure_dirs()
-    yield
+    creator_worker.start()
+    try:
+        yield
+    finally:
+        creator_worker.stop()
 
 
 class PlatformCallbackAccessFilter(logging.Filter):
@@ -82,47 +86,7 @@ class ExtractRequest(BaseModel):
     force: bool = Field(False, description="忽略去重，强制重新下载")
 
 
-class TrackOut(BaseModel):
-    id: int
-    platform: str
-    video_id: str
-    title: str
-    uploader: str | None
-    duration_sec: float | None
-    audio_bytes: int | None
-    audio_format: str
-    audio_sha256: str | None = None
-    source_url: str
-    updated_seq: int
-    updated_at_ms: int
-    deleted: bool
-    categories: list[str] = Field(default_factory=list)
-    has_vocal: bool | None = None
-    classify_stage: str | None = None
-    download_url: str
-
-    @classmethod
-    def of(cls, t: Track) -> "TrackOut":
-        return cls(
-            categories=json.loads(t.categories_json or "[]"),
-            has_vocal=None if t.has_vocal is None else bool(t.has_vocal),
-            classify_stage=t.classify_stage,
-            id=t.id,
-            platform=t.platform,
-            video_id=t.video_id,
-            title=t.title,
-            uploader=t.uploader,
-            duration_sec=t.duration_sec,
-            audio_bytes=t.audio_bytes,
-            audio_format=t.audio_format,
-            audio_sha256=t.audio_sha256,
-            source_url=t.source_url,
-            updated_seq=t.updated_seq,
-            updated_at_ms=int(t.updated_at.replace(tzinfo=timezone.utc).timestamp() * 1000)
-                if t.updated_at.tzinfo is None else int(t.updated_at.timestamp() * 1000),
-            deleted=bool(t.deleted),
-            download_url=f"/audio/{t.id}",
-        )
+from .track_out import TrackOut
 
 
 class ExtractResponse(BaseModel):
@@ -447,3 +411,9 @@ app.include_router(platform_account_router)
 
 from .failure_reports import router as failure_report_router
 app.include_router(failure_report_router)
+
+from .creator_api import router as creator_router
+app.include_router(creator_router)
+
+from .library_api import router as library_router
+app.include_router(library_router)

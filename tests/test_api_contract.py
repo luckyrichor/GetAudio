@@ -92,6 +92,25 @@ def test_all_api_routes_are_declared_in_kotlin():
 
     skip.add("/account/platform-auth/douyin/callback")
     skip.update({"/v2/platforms", "/v2/platforms/qr/{sid}/image", "/v2/audio/{track_id}"})
+    # 后端先行接口：Android 端还没有对应 DTO/Retrofit 方法，先由 curl/后续版本接入。
+    skip.update({
+        "/v2/creators/preview",
+        "/v2/creators/jobs",
+        "/v2/creators/jobs/{job_id}",
+        "/v2/creators/jobs/{job_id}/items",
+        "/v2/creators/jobs/{job_id}/cancel",
+        "/v2/creators/jobs/{job_id}/retry",
+        "/v2/resolve",
+        "/v2/tracks/{track_id}",
+        "/v2/tracks/{track_id}/restore",
+        "/v2/extraction-jobs",
+        "/v2/maintenance/reclassify",
+        "/v2/maintenance/repair-audio-sizes",
+        "/v2/maintenance/fingerprints/backfill",
+        "/v2/maintenance/duplicates",
+        "/v2/scheduler",
+        "/v2/scheduler/run-once",
+    })
     for path in server_api.app.openapi()["paths"]:
         # Legacy admin/guest API is deliberately no longer the mobile contract.
         if not path.startswith(("/account/", "/v2/", "/agent/v2/")):

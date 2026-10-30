@@ -11,8 +11,13 @@ WBI 签名：B 站从 2023 年起要求部分接口带 w_rid（参数按字典�
 """
 from __future__ import annotations
 
+import base64
 import hashlib
+import json
 import logging
+import math
+import random
+import string
 import tempfile
 import time
 import urllib.parse
@@ -95,6 +100,32 @@ def _sign(params: dict, mixin_key: str) -> dict:
     )
     signed["w_rid"] = hashlib.md5((query + mixin_key).encode()).hexdigest()
     return signed
+
+
+def reset_wbi_cache() -> None:
+    """空间接口返回 412/-352 时丢弃缓存的 WBI 密钥，下次重新向 nav 取。"""
+    global _wbi_cache
+    _wbi_cache = None
+
+
+def dm_params() -> dict[str, str]:
+    """空间接口还会看浏览器指纹参数，缺了容易被 412。"""
+    width, height = 1920, 1080
+    rnd = math.floor(114 * random.random())
+    wh = [2 * width + 2 * height + 3 * rnd, 4 * width - height + rnd, rnd]
+    scroll_top, scroll_left = 10, 10
+    rnd2 = math.floor(514 * random.random())
+    of = [3 * scroll_top + 2 * scroll_left + rnd2, 4 * scroll_top - 4 * scroll_left + 2 * rnd2, rnd2]
+    return {
+        "dm_img_list": "[]",
+        "dm_img_str": base64.b64encode(
+            "".join(random.choices(string.printable, k=random.randint(16, 64))).encode()
+        )[:-2].decode(),
+        "dm_cover_img_str": base64.b64encode(
+            "".join(random.choices(string.printable, k=random.randint(32, 128))).encode()
+        )[:-2].decode(),
+        "dm_img_inter": json.dumps({"ds": [], "wh": wh, "of": of}, separators=(",", ":")),
+    }
 
 
 def _parse_cookie_file(path: Path | None) -> dict[str, str]:

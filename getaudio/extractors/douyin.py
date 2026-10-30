@@ -75,7 +75,8 @@ class DouyinExtractor:
         self.prefer = prefer
         self.music_coverage = music_coverage
 
-    def extract(self, link: ResolvedLink, *, cookie_file: Path | None = None) -> ExtractResult:
+    def extract(self, link: ResolvedLink, *, cookie_file: Path | None = None,
+                aweme: dict | None = None) -> ExtractResult:
         settings.ensure_dirs()
         cookies = _parse_cookie_file(cookie_file)
         if "ttwid" not in cookies:
@@ -90,13 +91,30 @@ class DouyinExtractor:
         }
 
         with httpx.Client(timeout=settings.http_timeout, headers=headers, cookies=cookies, follow_redirects=True) as client:
-            detail = self._fetch_detail(client, link)
+            detail = aweme if isinstance(aweme, dict) else None
+            if detail is None:
+                detail = self._fetch_detail(client, link)
             info = self._to_media_info(detail, link)
-            source, urls = self._audio_sources(detail)
+            try:
+                source, urls = self._audio_sources(detail)
+            except ExtractorError:
+                if aweme is None:
+                    raise
+                detail = self._fetch_detail(client, link)
+                info = self._to_media_info(detail, link)
+                source, urls = self._audio_sources(detail)
 
             with tempfile.TemporaryDirectory(dir=settings.tmp_dir) as td:
                 raw_path = Path(td) / f"{info.video_id}.bin"
-                self._download(client, urls, raw_path)
+                try:
+                    self._download(client, urls, raw_path)
+                except ExtractorError:
+                    if aweme is None:
+                        raise
+                    detail = self._fetch_detail(client, link)
+                    info = self._to_media_info(detail, link)
+                    source, urls = self._audio_sources(detail)
+                    self._download(client, urls, raw_path)
                 # 无损抽轨：容器由源编码决定，不做二次压缩
                 out_path = extract_audio(raw_path, Path(td) / f"{info.video_id}-audio")
                 # 接口给的 duration 描述的是视频，不一定等于我们取到的音轨长度

@@ -11,4 +11,5 @@ for _name in ("audio", "tmp", "cookie"):
     os.environ[f"GETAUDIO_{_name.upper()}_DIR"] = str(_root / _name)
 os.environ["GETAUDIO_SECRET_KEY"] = base64.urlsafe_b64encode(os.urandom(32)).decode()
 os.environ["GETAUDIO_OLLAMA_MODEL"] = ""
+os.environ["GETAUDIO_CREATOR_WORKER_ENABLED"] = "false"
 os.environ["ARK_API_KEY"] = ""
