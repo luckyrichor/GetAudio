@@ -37,6 +37,7 @@
 - 公网受控测试验证注册/登录/登出、新旧会话复用、同步、下载/Range/哈希；force=true新B站P3提取reused=false且下载哈希匹配。测试账号/任务/文件已清理。
 - 生产能力接口确认抖音OAuth available=false，redirect_uri未配置，真实回调未验。因此最终停旧阶段没有执行：旧根入口保留，不能声称已完成单入口。下一步在平台配置具备后验收回调，再检查全部门槛后停旧。
 - 飞书已同步：开发记录追加2026-10-31 HTTPS子路径迁移交付一节（来源896ca88，文档revision15），内容与GetAudio父节点均已回查。链接：https://kcn0pbn0hwo0.feishu.cn/wiki/LRmyw4wfhiBcwIkyz83cQ4IOnUm 。旧入口仍保留，抖音OAuth未验不能停旧。
+- GitHub main已交付，v0.9.11为明确标记双入口阶段的prerelease：https://github.com/luckyrichor/GetAudio/releases/tag/v0.9.11 。附件getaudio-0.9.11-release.apk，33571879字节；GitHub返回SHA256与本机一致（44fe772a…bad7813c）。Release指向cc70b5f，后续仅文档收尾。飞书发布补充revision16正文与父节点均已回查。
 
 ## 项目交接（当前维护：Codex，2026-10-28）
 

@@ -36,3 +36,10 @@
 - 实际运行进程的旧/新/旧 OpenAPI servers 分别为 /、/getaudio、/，缓存不串前缀。公开文档端点仍按原Basic保护，不为测试放开权限。
 - B站授权完成后才重启服务，已写入的凭据保留；没有打断用户正在进行的扫码。
 - 验证输入说明：一次 ADB input text 被当前中文输入法转换成非链接文字，产生 HTTP400；随后改用系统 ACTION_SEND 传入原始链接，直提取和服务器提取均成功。该400不是迁移路由错误。
+
+## 发布产物
+
+- GitHub main已快进至cc70b5f（实现8d67654、OpenAPI修复896ca88及验收文档）。本机公众开放设计v3仍未跟踪，未夹带提交。
+- v0.9.11以prerelease发布，明确标记“双入口阶段、旧入口未退役”：https://github.com/luckyrichor/GetAudio/releases/tag/v0.9.11 。标签目标cc70b5f；后续仅文档收尾。
+- 附件getaudio-0.9.11-release.apk为33571879字节；GitHub API digest与本地SHA256同为44fe772a485bfcf286f6d0eedb0719aec8b230cf4b72a780a1e60ef2bad7813c。固定签名与手机原包一致，手机安装版本为0.9.11/code39。
+- 飞书开发记录已追加并回查正文与GetAudio父节点；发布产物另追加补充，避免改写已有验收记录。
