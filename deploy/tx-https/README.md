@@ -1,3 +1,13 @@
+# 0.9.11 HTTPS 项目路径迁移（2026-10-31）
+
+新基础地址：`https://43.142.37.199/getaudio/`。后端仍监听本机 8800；Nginx 的 `/getaudio/` 保留 URI，ASGI 中间件按请求 root_path 处理，不使用全局 uvicorn --root-path。新旧入口当前并存，未经全部验收不得停旧。
+
+在现有 443 server 内增量 include `/etc/nginx/snippets/getaudio-prefix.conf`（源文件为本目录同名文件）。不要用仓库 getaudio.conf 整份覆盖生产配置，生产 server 内还有其他项目路径。nginx -t 通过后 reload；健康检查、应用账号鉴权、浏览器 OAuth 回调与旧 Basic Auth 接口分开处理。
+
+完整范围、备份、验收及回滚见 `docs/getaudio-https-path-migration-plan.md`、`docs/getaudio-path-migration-ledger.md`。当前抖音 OAuth 未配置，真实回调无法验证，因此旧入口保留；不是最终单入口状态。
+
+以下为历史部署记录，旧地址只描述当时情况，不作为新版默认配置：
+
 # tx 手机 HTTPS 直连（2026-09-30 已部署）
 
 ## 当前入口与产品流程

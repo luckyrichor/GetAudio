@@ -25,16 +25,18 @@
 - 测试数量、耗时和结论只对应实际验证的版本。构建通过不等于真机验收。
 - 写入后回查内容和父节点，交付所属目录与链接。
 
-## HTTPS 子路径迁移进行中（2026-10-31，Codex）
+## HTTPS 子路径迁移：双入口已上线，停旧待验（2026-10-31，Codex）
 
-- 用户授权从 GitHub 同步后实施 `https://43.142.37.199/getaudio/`，先双入口，手机登录/同步/提取/播放/下载/平台授权全部验收后才停旧。
-- 基线 dc2abeb，分支 codex/getaudio-path-migration。方案 `docs/getaudio-https-path-migration-plan.md`，实施记录 `docs/getaudio-path-migration-ledger.md`。
-- 0.9.11 / code39 已实现请求级 prefix、双入口链接、Nginx 新子路径、Android 地址/会话读入兼容、稳定旧 cloudScope、旧 outbox 匹配、统一资源解析、凭据路径与 HTTPS 降级保护；不批量重写 Room、不删除数据、不改其他项目。
-- 本地 Android 104 项通过，Lint 0 errors/27 warnings，release 固定签名构建通过；Mac 服务端 186 passed + 1 已有 Chromaprint 失败。独立审查的降级问题已补失败测试及修复。
-- 生产备份 `/home/ubuntu/backups/getaudio-path-20261031T143214Z`，SQLite 一致性快照、媒体及原 Nginx 配置已保存；待部署与真机验证。
-- 当前手机 23013RK75C（不是历史 K80），GetAudio 0.9.10/code38，与新 APK 固定签名一致；现有登录及10首本机音频需保留。
-- 已核对 tx 当前配置未启用抖音 OAuth（Shell settings 检查），需进一步用运行服务能力接口确认，真实回调未验。因此本轮暂不得停旧入口。
-- 飞书待同步：2026-10-31 HTTPS 子路径迁移实施进展；交付时补写开发记录并回查。
+- 用户授权先从GitHub同步再实施 `https://43.142.37.199/getaudio/`；必要功能全部真实验收后才停旧，未验时保留旧入口。基线dc2abeb，功能提交8d67654、OpenAPI修复896ca88。
+- 0.9.11/code39已实现请求级prefix、Nginx子路径、双入口链接和OpenAPI、Android地址/会话读入兼容、旧scope稳定身份、旧outbox兼容、统一资源解析、凭据路径及HTTPS降级保护。不批量改Room、不删除数据、不改其他项目。
+- 方案 `docs/getaudio-https-path-migration-plan.md`，实际实施/验证/回滚边界见 `docs/getaudio-path-migration-ledger.md`。Nginx保留URI，由ASGI root_path参与路由匹配；不能改成剥离前缀再重复叠加root_path。
+- Android104项通过，Lint0 errors/27 warnings，debug/release固定签名构建通过；Mac服务端187 passed+1既有Chromaprint失败。tx完整188项通过并部署双入口；新旧health及其他项目复验正常。
+- 生产备份 `/home/ubuntu/backups/getaudio-path-20261031T143214Z`：SQLite一致性快照、媒体、原Nginx和紧邻变更前Nginx；生产data/仍保留。其他项目include未覆盖，GetVideo8443和Paperdrift回归200。
+- 手机23013RK75C（不是历史K80），同签名原地升级0.9.10→0.9.11成功，原登录/10首本机媒体/列表/进度保留。新路径连接显示账号正常；同步、真实下载和播放、B站P3手机/服务器提取、冷启动恢复通过。本轮添加验证样本后本机12首。
+- B站内容授权由用户本人扫码确认，页面显示登录成功、凭据有效；不是仅显示二维码。主账号平台绑定/快捷登录未额外改变或验收。
+- 公网受控测试验证注册/登录/登出、新旧会话复用、同步、下载/Range/哈希；force=true新B站P3提取reused=false且下载哈希匹配。测试账号/任务/文件已清理。
+- 生产能力接口确认抖音OAuth available=false，redirect_uri未配置，真实回调未验。因此最终停旧阶段没有执行：旧根入口保留，不能声称已完成单入口。下一步在平台配置具备后验收回调，再检查全部门槛后停旧。
+- 飞书已同步：开发记录追加2026-10-31 HTTPS子路径迁移交付一节（来源896ca88，文档revision15），内容与GetAudio父节点均已回查。链接：https://kcn0pbn0hwo0.feishu.cn/wiki/LRmyw4wfhiBcwIkyz83cQ4IOnUm 。旧入口仍保留，抖音OAuth未验不能停旧。
 
 ## 项目交接（当前维护：Codex，2026-10-28）
 

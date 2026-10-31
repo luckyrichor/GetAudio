@@ -12,7 +12,7 @@
 
 新的生产基础地址为 `https://43.142.37.199/getaudio/`，账号、同步、提取与资源都在此路径下。迁移采用双入口阶段：当前代码兼容旧入口，未经手机全部功能验收不得停旧。旧登录态、云端 scope、同步游标、列表与文件保留；凭据限定到项目路径。方案、实施状态与回滚见 [迁移方案](docs/getaudio-https-path-migration-plan.md) 与 [实施记录](docs/getaudio-path-migration-ledger.md)。
 
-本地 Android 104 项单测、Lint 0 errors/27 warnings、release 构建通过；Mac 服务端 186 passed，另有既有 Chromaprint 失败。生产部署和手机结果以实施记录为准。
+本地 Android 104 项单测、Lint 0 errors/27 warnings、release 构建通过；Mac 服务端 187 passed，另有既有 Chromaprint 失败。生产部署和手机结果以实施记录为准。
 
 ## 快速开始
 
@@ -53,7 +53,7 @@ cd android
 ./gradlew assembleDebug -PgetaudioPreview=true
 ```
 
-安装后在抖音或 B 站分享作品到 GetAudio，或在「提取」页粘贴链接。手机直接向原平台请求公开作品信息和音频，音频保存在 App 私有目录，可在「音频库」播放或点导出按钮选择手机文件位置。默认服务器地址为 `https://43.142.37.199/`，手机通过 Wi-Fi 或移动网络直接访问 tx，无需 Mac 或 USB。点击「从服务器提取」可由 tx 下载视频、提取音频并自动下载到手机。生产接口使用设备私有访问凭据，凭据不打包进 APK。手机端本地提取不需要 Ollama 或 API Key，也不进行 AI 分类。
+安装后在抖音或 B 站分享作品到 GetAudio，或在「提取」页粘贴链接。手机直接向原平台请求公开作品信息和音频，音频保存在 App 私有目录，可在「音频库」播放或点导出按钮选择手机文件位置。默认服务器地址为 `https://43.142.37.199/getaudio/`，手机通过 Wi-Fi 或移动网络直接访问 tx，无需 Mac 或 USB。点击「从服务器提取」可由 tx 下载视频、提取音频并自动下载到手机。账号接口使用设备私有的 GetAudio 登录会话，凭据不打包进 APK。手机端本地提取不需要 Ollama 或 API Key，也不进行 AI 分类。
 
 公网 HTTPS 与证书自动续期已部署，详见 [tx 直连部署记录](deploy/tx-https/README.md)。`./scripts/connect-tx-phone.sh` 仅保留为开发调试工具，正式连接不使用它。
 
