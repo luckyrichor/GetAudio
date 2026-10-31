@@ -63,3 +63,11 @@ def test_prefixed_slash_redirect_preserves_https_and_namespace():
         response = client.get('/getaudio/health/', follow_redirects=False)
         assert response.status_code == 307
         assert response.headers['location'] == 'https://testserver/getaudio/health'
+
+
+def test_openapi_cache_never_sends_new_docs_to_old_root_or_vice_versa():
+    with TestClient(app) as client:
+        for path, expected in [('/openapi.json', '/'), ('/getaudio/openapi.json', '/getaudio'),
+                               ('/openapi.json', '/')]:
+            schema = client.get(path).json()
+            assert schema.get('servers') == [{'url': expected}]

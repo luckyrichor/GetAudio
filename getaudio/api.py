@@ -59,9 +59,18 @@ class PlatformCallbackAccessFilter(logging.Filter):
 
 logging.getLogger("uvicorn.access").addFilter(PlatformCallbackAccessFilter())
 
-app = FastAPI(title="GetAudio", version="0.8.1", lifespan=lifespan,
+app = FastAPI(title="GetAudio", version="0.8.1", lifespan=lifespan, root_path_in_servers=False,
               dependencies=[Depends(accounts.protect_account_ids)])
 app.add_middleware(PublicPrefixMiddleware)
+_base_openapi = app.openapi
+
+
+def _public_openapi():
+    # FastAPI caches the schema globally; never put a request's prefix into it.
+    return {**_base_openapi(), 'servers': [{'url': public_path('') or '/'}]}
+
+
+app.openapi = _public_openapi
 app.include_router(accounts.router)
 app.include_router(extraction_agent.router)
 
