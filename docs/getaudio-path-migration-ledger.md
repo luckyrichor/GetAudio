@@ -43,3 +43,15 @@
 - v0.9.11以prerelease发布，明确标记“双入口阶段、旧入口未退役”：https://github.com/luckyrichor/GetAudio/releases/tag/v0.9.11 。标签目标cc70b5f；后续仅文档收尾。
 - 附件getaudio-0.9.11-release.apk为33571879字节；GitHub API digest与本地SHA256同为44fe772a485bfcf286f6d0eedb0719aec8b230cf4b72a780a1e60ef2bad7813c。固定签名与手机原包一致，手机安装版本为0.9.11/code39。
 - 飞书开发记录已追加并回查正文与GetAudio父节点；发布产物另追加补充，避免改写已有验收记录。
+
+## 最终停旧（2026-10-31，用户追加明确授权）
+
+- 用户明确：抖音授权原本未提供，不再作为停旧条件；将来增加也只使用新路径。此指令取代此前“抖音回调无法验收则保留旧入口”的限制。
+- 修改仓库Nginx模板和生产现有443 server：移除旧health、旧OAuth callback、根account/v2/agent正则及默认Basic代理；catch-all改为404。新getaudio-prefix及其他项目include完整保留，内部8800和80证书验证未改。
+- 备份 `/home/ubuntu/backups/getaudio-root-retire-20261031T151834Z/nginx-before.conf`；nginx -t通过后reload，未重启应用、未修改数据或凭据。
+- 新配置回归测试先失败（旧根仍有proxy_pass），修改后通过。Mac全量187 passed+1既有Chromaprint失败；生产测试结果后续追加。
+- 公网GET旧根、health、account、v2、audio、tracks、sync、login、credentials、agent、docs、OpenAPI、旧抖音回调及路径变体全部404，无WWW-Authenticate/Location；旧注册/登录/提取POST同为404。
+- 新getaudio/health200，account/me与sync匿名401，注册登录空请求422，未来新OAuth回调缺参422，缺尾斜杠getaudio规范化308；其他项目getvideo/health与paperdrift仍200。
+- 用临时账号实际验证新注册/登录/me/同步/登出，旧路由即使带有效会话也404；测试账号已清理。活动Nginx中全部8800代理只来自新前缀snippet，其余include哈希未变。
+- 本轮未改App或APK；手机前台为NotificationShade，未强占设备重跑UI，沿用此前0.9.11实机验收，新入口本轮补公网认证测试。当前0.9.11无需重装，旧版App需升级。
+- 最终公网状态：GetAudio仅/getaudio/，旧根入口已退役；ASGI内部旧路由保留供本机业务匹配，不是公网兼容入口。

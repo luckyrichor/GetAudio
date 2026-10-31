@@ -1,10 +1,10 @@
 # 0.9.11 HTTPS 项目路径迁移（2026-10-31）
 
-新基础地址：`https://43.142.37.199/getaudio/`。后端仍监听本机 8800；Nginx 的 `/getaudio/` 保留 URI，ASGI 中间件按请求 root_path 处理，不使用全局 uvicorn --root-path。新旧入口当前并存，未经全部验收不得停旧。
+唯一公网基础地址：`https://43.142.37.199/getaudio/`。后端仍监听本机8800；Nginx保留URI，ASGI中间件按请求root_path处理，不使用全局uvicorn --root-path。旧根入口已按用户追加指令删除，根地址及旧API路径返回404，不跳转、不弹身份验证。
 
 在现有 443 server 内增量 include `/etc/nginx/snippets/getaudio-prefix.conf`（源文件为本目录同名文件）。不要用仓库 getaudio.conf 整份覆盖生产配置，生产 server 内还有其他项目路径。nginx -t 通过后 reload；健康检查、应用账号鉴权、浏览器 OAuth 回调与旧 Basic Auth 接口分开处理。
 
-完整范围、备份、验收及回滚见 `docs/getaudio-https-path-migration-plan.md`、`docs/getaudio-path-migration-ledger.md`。当前抖音 OAuth 未配置，真实回调无法验证，因此旧入口保留；不是最终单入口状态。
+完整范围、备份、验收及回滚见 `docs/getaudio-https-path-migration-plan.md`、`docs/getaudio-path-migration-ledger.md`。停旧只删除旧根路由的代理，最终catch-all为 `location / { return 404; }`；保留getaudio-prefix及其他项目include，80证书验证不变。抖音OAuth未配置，未来只用新路径增加，不能恢复旧根回调。不要因内部8800仍支持旧路由就认为旧公网入口还存在。
 
 以下为历史部署记录，旧地址只描述当时情况，不作为新版默认配置：
 

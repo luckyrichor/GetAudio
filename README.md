@@ -10,7 +10,7 @@
 
 ## HTTPS 子路径迁移（0.9.11）
 
-新的生产基础地址为 `https://43.142.37.199/getaudio/`，账号、同步、提取与资源都在此路径下。迁移采用双入口阶段：当前代码兼容旧入口，未经手机全部功能验收不得停旧。旧登录态、云端 scope、同步游标、列表与文件保留；凭据限定到项目路径。方案、实施状态与回滚见 [迁移方案](docs/getaudio-https-path-migration-plan.md) 与 [实施记录](docs/getaudio-path-migration-ledger.md)。
+唯一生产基础地址为 `https://43.142.37.199/getaudio/`，账号、同步、提取与资源都在此路径下。旧公网根入口已删除，直接访问根地址或旧API路径返回404，不跳转也不再弹身份验证。0.9.11已适配，旧版App需要升级。原登录态、云端scope、同步游标、列表与文件保留。抖音OAuth尚未提供，未来也只在新路径增加，不作为保留旧入口的理由。方案、实施状态与回滚见 [迁移方案](docs/getaudio-https-path-migration-plan.md) 与 [实施记录](docs/getaudio-path-migration-ledger.md)。
 
 本地 Android 104 项单测、Lint 0 errors/27 warnings、release 构建通过；Mac 服务端 187 passed，另有既有 Chromaprint 失败。生产部署和手机结果以实施记录为准。
 
