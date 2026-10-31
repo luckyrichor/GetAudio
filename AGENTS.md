@@ -30,7 +30,7 @@
 - 用户追加明确指令：抖音OAuth本来未提供，不作为停旧前提；立即删除旧公网根入口，未来授权只增加到新路径。GetAudio现在仅由 `https://43.142.37.199/getaudio/` 对公网提供服务。基线dc2abeb，功能提交8d67654、OpenAPI修复896ca88。
 - 0.9.11/code39已实现请求级prefix、Nginx子路径、双入口链接和OpenAPI、Android地址/会话读入兼容、旧scope稳定身份、旧outbox兼容、统一资源解析、凭据路径及HTTPS降级保护。不批量改Room、不删除数据、不改其他项目。
 - 方案 `docs/getaudio-https-path-migration-plan.md`，实际实施/验证/回滚边界见 `docs/getaudio-path-migration-ledger.md`。Nginx保留URI，由ASGI root_path参与路由匹配；不能改成剥离前缀再重复叠加root_path。
-- Android104项、Lint0 errors/27 warnings、固定签名构建沿用0.9.11验收，本次不改App。停旧配置回归已通过；Mac全量187 passed+1既有Chromaprint失败，tx完整188项结果见实施记录。旧health现在404，新health200。
+- Android104项、Lint0 errors/27 warnings、固定签名构建沿用0.9.11验收，本次不改App。停旧配置回归已通过；Mac全量187 passed+1既有Chromaprint失败，tx本轮完整188项通过。旧health现在404，新health200。
 - 生产备份 `/home/ubuntu/backups/getaudio-path-20261031T143214Z`：SQLite一致性快照、媒体、原Nginx和紧邻变更前Nginx；生产data/仍保留。其他项目include未覆盖，GetVideo8443和Paperdrift回归200。
 - 手机23013RK75C（不是历史K80），同签名原地升级0.9.10→0.9.11成功，原登录/10首本机媒体/列表/进度保留。新路径连接显示账号正常；同步、真实下载和播放、B站P3手机/服务器提取、冷启动恢复通过。本轮添加验证样本后本机12首。
 - B站内容授权由用户本人扫码确认，页面显示登录成功、凭据有效；不是仅显示二维码。主账号平台绑定/快捷登录未额外改变或验收。
@@ -38,8 +38,8 @@
 - 旧 `/`、`/health`、`/account/*`、`/v2/*`、`/audio/*`、`/login/*`、`/agent/*`、docs/OpenAPI及旧OAuth回调均404，没有Basic挑战和重定向；带有效会话也无法走旧路由。新路径注册/登录/会话/同步/登出实测正常。活动Nginx中所有8800代理均只存在于getaudio-prefix.conf；其他项目include文件内容哈希保持不变，GetVideo新路径及Paperdrift均200。
 - Nginx停旧前备份 `/home/ubuntu/backups/getaudio-root-retire-20261031T151834Z/nginx-before.conf`。内部8800、数据、凭据、新项目路径、其他项目路由和80证书验证保留；不是关闭443端口。旧App需升级0.9.11，现有0.9.11无需重装。
 - 抖音OAuth仍未配置，不宣称已实现；用户明确不以此阻止停旧。将来只登记 `/getaudio/account/platform-auth/douyin/callback`，不能恢复旧根回调。
-- 飞书开发记录历史revision15/16记录的是当时双入口状态，应在文末追加本次停旧更正。链接：https://kcn0pbn0hwo0.feishu.cn/wiki/LRmyw4wfhiBcwIkyz83cQ4IOnUm 。飞书待同步：2026-10-31 删除旧公网根入口的最终状态。
-- v0.9.11附件不变：https://github.com/luckyrichor/GetAudio/releases/tag/v0.9.11 。getaudio-0.9.11-release.apk为33571879字节，SHA256为44fe772a…bad7813c，APK标签仍指向cc70b5f；本次仅服务器配置/测试/文档，发布说明需同步停旧状态。
+- 飞书开发记录revision17已追加停旧更正，正文与GetAudio父节点均已回查，保留revision15/16的历史双入口状态。来源d180a1b，链接：https://kcn0pbn0hwo0.feishu.cn/wiki/LRmyw4wfhiBcwIkyz83cQ4IOnUm 。
+- v0.9.11附件不变：https://github.com/luckyrichor/GetAudio/releases/tag/v0.9.11 。getaudio-0.9.11-release.apk为33571879字节，SHA256为44fe772a…bad7813c，APK标签仍指向cc70b5f；本次仅服务器配置/测试/文档。发布说明已更新停旧状态并取消prerelease标记，不重新上传或改签APK。
 
 ## 项目交接（当前维护：Codex，2026-10-28）
 
