@@ -30,6 +30,7 @@ object ApiProvider {
     fun initialize(context: Context) { AccountStore.initialize(context) }
 
     private val client = OkHttpClient.Builder()
+        .followSslRedirects(false)
         .addInterceptor { chain ->
             // Never record URL paths, query strings, headers, bodies or account identifiers.
             try {

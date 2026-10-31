@@ -48,7 +48,9 @@ object AccountStore {
         state.value = runCatching {
             if (!file.exists()) return@runCatching null
             val data = JSONObject(String(decrypt(file.readBytes()), Charsets.UTF_8))
-            Account(data.getString("user_id"), data.getString("phone"), data.getString("token"), data.getString("server"))
+            // Read-through migration is idempotent across process death. Existing
+            // encrypted bytes, Room identities, files and playlist IDs remain intact.
+            Account(data.getString("user_id"), data.getString("phone"), data.getString("token"), migratedServerUrl(data.getString("server")))
         }.getOrNull()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { refreshVisibility(context) }
     }
@@ -111,7 +113,7 @@ object AccountStore {
         }
     }
 
-    fun forServer(baseUrl: String): Account? = state.value?.takeIf { it.serverUrl == baseUrl }
+    fun forServer(baseUrl: String): Account? = state.value?.takeIf { it.serverUrl == migratedServerUrl(baseUrl) }
 
     fun sessionFor(url: HttpUrl): String? = state.value?.let { account ->
         val base = account.serverUrl.toHttpUrl()

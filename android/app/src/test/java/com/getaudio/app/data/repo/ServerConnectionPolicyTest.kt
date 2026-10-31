@@ -6,9 +6,9 @@ import org.junit.Test
 
 class ServerConnectionPolicyTest {
     @Test fun `old development defaults migrate while custom servers remain`() {
-        assertEquals("https://43.142.37.199/", effectiveServerUrl("http://127.0.0.1:18800/"))
-        assertEquals("https://43.142.37.199/", effectiveServerUrl("http://10.0.2.2:8800/"))
-        assertEquals("https://43.142.37.199/", effectiveServerUrl(null))
+        assertEquals("https://43.142.37.199/getaudio/", effectiveServerUrl("http://127.0.0.1:18800/"))
+        assertEquals("https://43.142.37.199/getaudio/", effectiveServerUrl("http://10.0.2.2:8800/"))
+        assertEquals("https://43.142.37.199/getaudio/", effectiveServerUrl(null))
         assertEquals("https://custom.example/", effectiveServerUrl("https://custom.example/"))
     }
     @Test fun `credentials only accompany intended HTTPS origin including downloads`() {

@@ -13,6 +13,7 @@ from .config import settings
 from .pipeline import extract
 from .extractors import ExtractorError, NeedsLoginError
 from .sharelink import LinkError
+from .public_prefix import public_path
 from .api import TrackOut, ExtractResponse, SyncResponse, LoginStartResponse, LoginPollResponse
 
 router = APIRouter(prefix='/v2', tags=['account resources'])
@@ -35,7 +36,7 @@ class CookieBody(PlatformBody):
 
 def track_out(track):
     result = TrackOut.of(track)
-    result.download_url = f'/v2/audio/{track.id}'
+    result.download_url = public_path(f'/v2/audio/{track.id}')
     return result
 
 
@@ -102,7 +103,7 @@ def start(body: PlatformBody, user: AppUser = Depends(current_user)):
     except login.LoginError as e:
         raise HTTPException(502, str(e)) from e
     return LoginStartResponse(session_id=q.session_id, platform=q.platform, qr_url=q.qr_url,
-                              qr_image_url=f'/v2/platforms/qr/{q.session_id}/image', expires_in=q.expires_in)
+                              qr_image_url=public_path(f'/v2/platforms/qr/{q.session_id}/image'), expires_in=q.expires_in)
 
 
 @router.get('/platforms/qr/{sid}', response_model=LoginPollResponse)

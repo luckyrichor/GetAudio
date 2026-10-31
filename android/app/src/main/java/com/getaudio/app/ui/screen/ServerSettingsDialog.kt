@@ -27,18 +27,18 @@ internal fun ServerSettingsDialog(close: () -> Unit) {
         scope.launch {
             try {
                 message = runCatching {
-                    AccountStore.requireSecureServer(address)
-                    val url = address.trim().trimEnd('/').toHttpUrl()
-                    require(url.encodedPath == "/" && url.query == null && url.fragment == null) { "请输入服务器根地址" }
+                    val base = checkedServerBase(address)
+                    AccountStore.requireSecureServer(base)
+                    val url = base.toHttpUrl()
                     withContext(Dispatchers.IO) {
                         ApiProvider.okHttp().newBuilder().followRedirects(false).callTimeout(15, java.util.concurrent.TimeUnit.SECONDS).build()
-                            .newCall(Request.Builder().url(url.newBuilder().addPathSegment("health").build()).build()).execute().use {
+                            .newCall(Request.Builder().url(url.resolve("health")!!).build()).execute().use {
                                 check(it.isSuccessful && JSONObject(it.body?.string().orEmpty()).optBoolean("ok")) { "服务器连接检查失败" }
                             }
                     }
-                    if (save) Settings(context).setServerUrl(address)
-                    if (AccountStore.forServer(address.trim().trimEnd('/') + "/") == null) "服务器连接正常，请登录 GetAudio 账号" else {
-                        ApiProvider.api(address.trim().trimEnd('/') + "/").accountMe()
+                    if (save) Settings(context).setServerUrl(base)
+                    if (AccountStore.forServer(base) == null) "服务器连接正常，请登录 GetAudio 账号" else {
+                        ApiProvider.api(base).accountMe()
                         "服务器连接及账号登录正常"
                     }
                 }.getOrElse { ApiProvider.humanMessage(it) }

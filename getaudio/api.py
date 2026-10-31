@@ -28,6 +28,7 @@ from .extractors import ExtractorError, NeedsLoginError
 from .models import AgentMemory, Track
 from .pipeline import extract as run_extract
 from .sharelink import LinkError
+from .public_prefix import PublicPrefixMiddleware, public_path
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +49,9 @@ class PlatformCallbackAccessFilter(logging.Filter):
         # Uvicorn access records contain the request target at args[2].
         if isinstance(record.args, tuple) and len(record.args) == 5:
             args = list(record.args)
-            if isinstance(args[2], str) and args[2].split("?", 1)[0] == "/account/platform-auth/douyin/callback":
+            if isinstance(args[2], str) and args[2].split("?", 1)[0] in (
+                "/account/platform-auth/douyin/callback", "/getaudio/account/platform-auth/douyin/callback",
+            ):
                 args[2] = args[2].split("?", 1)[0]
                 record.args = tuple(args)
         return True
@@ -58,6 +61,7 @@ logging.getLogger("uvicorn.access").addFilter(PlatformCallbackAccessFilter())
 
 app = FastAPI(title="GetAudio", version="0.8.1", lifespan=lifespan,
               dependencies=[Depends(accounts.protect_account_ids)])
+app.add_middleware(PublicPrefixMiddleware)
 app.include_router(accounts.router)
 app.include_router(extraction_agent.router)
 
@@ -338,7 +342,7 @@ def api_login_start(req: LoginStartRequest) -> LoginStartResponse:
         session_id=session.session_id,
         platform=session.platform,
         qr_url=session.qr_url,
-        qr_image_url=f"/login/qr/{session.session_id}/image",
+        qr_image_url=public_path(f"/login/qr/{session.session_id}/image"),
         expires_in=session.expires_in,
     )
 

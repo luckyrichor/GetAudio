@@ -11,6 +11,7 @@ from datetime import timezone
 from pydantic import BaseModel, Field
 
 from .models import Track
+from .public_prefix import public_path
 
 
 class TrackOut(BaseModel):
@@ -52,5 +53,5 @@ class TrackOut(BaseModel):
             updated_at_ms=int(t.updated_at.replace(tzinfo=timezone.utc).timestamp() * 1000)
                 if t.updated_at.tzinfo is None else int(t.updated_at.timestamp() * 1000),
             deleted=bool(t.deleted),
-            download_url=f"/audio/{t.id}",
+            download_url=public_path(f"/audio/{t.id}"),
         )

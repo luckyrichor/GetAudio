@@ -120,7 +120,8 @@ def _owned_track(session: Session, track_id: int, user: AppUser) -> Track:
 
 def _out(track: Track):
     result = TrackOut.of(track)
-    result.download_url = f"/v2/audio/{track.id}"
+    from .public_prefix import public_path
+    result.download_url = public_path(f"/v2/audio/{track.id}")
     return result
 
 

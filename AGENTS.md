@@ -25,6 +25,17 @@
 - 测试数量、耗时和结论只对应实际验证的版本。构建通过不等于真机验收。
 - 写入后回查内容和父节点，交付所属目录与链接。
 
+## HTTPS 子路径迁移进行中（2026-10-31，Codex）
+
+- 用户授权从 GitHub 同步后实施 `https://43.142.37.199/getaudio/`，先双入口，手机登录/同步/提取/播放/下载/平台授权全部验收后才停旧。
+- 基线 dc2abeb，分支 codex/getaudio-path-migration。方案 `docs/getaudio-https-path-migration-plan.md`，实施记录 `docs/getaudio-path-migration-ledger.md`。
+- 0.9.11 / code39 已实现请求级 prefix、双入口链接、Nginx 新子路径、Android 地址/会话读入兼容、稳定旧 cloudScope、旧 outbox 匹配、统一资源解析、凭据路径与 HTTPS 降级保护；不批量重写 Room、不删除数据、不改其他项目。
+- 本地 Android 104 项通过，Lint 0 errors/27 warnings，release 固定签名构建通过；Mac 服务端 186 passed + 1 已有 Chromaprint 失败。独立审查的降级问题已补失败测试及修复。
+- 生产备份 `/home/ubuntu/backups/getaudio-path-20261031T143214Z`，SQLite 一致性快照、媒体及原 Nginx 配置已保存；待部署与真机验证。
+- 当前手机 23013RK75C（不是历史 K80），GetAudio 0.9.10/code38，与新 APK 固定签名一致；现有登录及10首本机音频需保留。
+- 已核对 tx 当前配置未启用抖音 OAuth（Shell settings 检查），需进一步用运行服务能力接口确认，真实回调未验。因此本轮暂不得停旧入口。
+- 飞书待同步：2026-10-31 HTTPS 子路径迁移实施进展；交付时补写开发记录并回查。
+
 ## 项目交接（当前维护：Codex，2026-10-28）
 
 ### 项目概述与边界

@@ -74,8 +74,8 @@ android {
         minSdk = 26          // Media3 和后台播放在 8.0 以下坑太多
         testInstrumentationRunner = providers.gradleProperty("getaudioTestRunner").getOrElse("com.getaudio.app.BatchDeleteInstrumentation")
         targetSdk = 34
-        versionCode = 38
-        versionName = "0.9.10"
+        versionCode = 39
+        versionName = "0.9.11"
         manifestPlaceholders["appLabel"] = "@string/app_name"
 
     }

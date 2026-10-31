@@ -9,7 +9,8 @@ X-GetAudio-Session: <session_token>
 服务端默认监听 `http://127.0.0.1:8800`，生产走 HTTPS；下面的 `$BASE` 按环境替换。
 
 ```bash
-export BASE=http://127.0.0.1:8800
+export BASE=https://43.142.37.199/getaudio
+# 本地开发：export BASE=http://127.0.0.1:8800
 ```
 
 ## 1. 注册 / 登录
